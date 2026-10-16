@@ -91,7 +91,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p publish
-          cp artifacts/mac-arm64/*.dmg artifacts/mac-arm64/*.zip artifacts/mac-x64/*.dmg artifacts/mac-x64/*.zip publish/
+          for arch in arm64 x64; do
+            cp "artifacts/mac-$arch/Tracelet-mac-$arch.dmg" "artifacts/mac-$arch/Tracelet-mac-$arch.zip" publish/
+          done
           version=$(node -p "require('./package.json').version")
           tag="v$version"
           if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "$tag" ]]; then exit 1; fi

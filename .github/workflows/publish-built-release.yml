@@ -1,0 +1,75 @@
+name: Publish built release
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/publish-built-release.yml']
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Trusted Release macOS run containing completed Mac artifacts
+        required: true
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: release-publication
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify artifact provenance
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.run_id || '38981197408' }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" > /tmp/source-run.json
+          node - <<'JS'
+          const fs=require('fs');const r=JSON.parse(fs.readFileSync('/tmp/source-run.json'));
+          if(r.name!=='Release macOS'||r.head_repository.full_name!==process.env.GITHUB_REPOSITORY||!['push','workflow_dispatch'].includes(r.event))throw new Error('Untrusted artifact provenance');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,`run_id=${r.id}\nsha=${r.head_sha}\n`);
+          JS
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: mac-*
+          path: artifacts
+          run-id: ${{ steps.source.outputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Prepare exact architecture assets and checksums
+        run: |
+          set -euo pipefail
+          mkdir publish
+          for arch in arm64 x64; do
+            cp "artifacts/mac-$arch/Tracelet-mac-$arch.dmg" "artifacts/mac-$arch/Tracelet-mac-$arch.zip" publish/
+            unzip -tq "publish/Tracelet-mac-$arch.zip"
+          done
+          cd publish
+          sha256sum *.dmg *.zip > SHA256SUMS.txt
+          cd ..
+          node scripts/release-notes.mjs > release-notes.md
+      - name: Publish existing tagged source without rebuilding
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          version=$(git show "$SOURCE_SHA:package.json" | node -e "let s='';process.stdin.on('data',b=>s+=b);process.stdin.on('end',()=>console.log(JSON.parse(s).version))")
+          tag="v$version"
+          git fetch --no-tags origin "refs/tags/$tag:refs/tags/$tag"
+          [[ "$(git rev-list -n1 "$tag")" == "$SOURCE_SHA" ]]
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo '::error::A release already exists; refusing to overwrite its binaries.'
+            exit 1
+          fi
+          if ! gh release create "$tag" publish/* --target "$SOURCE_SHA" --title "Tracelet $tag" --notes-file release-notes.md > /tmp/publish.log 2>&1; then
+            while IFS= read -r line; do echo "::error::$line"; done < /tmp/publish.log
+            exit 1
+          fi
+          cat /tmp/publish.log

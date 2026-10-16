@@ -5,7 +5,7 @@ on:
     paths: ['site/**', 'scripts/release-manifest.mjs', '.github/workflows/pages.yml']
   workflow_dispatch:
   workflow_run:
-    workflows: [Release macOS]
+    workflows: [Release macOS, Publish built release]
     types: [completed]
 permissions:
   contents: read

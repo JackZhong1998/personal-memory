@@ -29,6 +29,8 @@ SHA256SUMS.txt
 
 两套安装包都成功后才发布 Release。相同版本已存在时拒绝覆盖，需递增 package.json 版本并更新 npm lockfile 的根版本。
 
+若构建成功而最后上传失败，可在 Actions 手动运行 `Publish built release`，填写之前 `Release macOS` 的 run ID。它核对来源、原始 commit 与 tag，只提取各架构对应的包并校验 ZIP，再从保留的构建产物发布，避免重新构建。该恢复流程拒绝覆盖现有 Release。
+
 Release 完成触发 Pages 工作流，查询 GitHub 最新 Release 的实际文件，生成 `site/release.json`。官网只在清单中存在真实文件时启用下载。没有发布文件时显示“尚未发布”，不伪造下载地址。页面会准确区分签名/公证状态。
 
 ## Apple 签名和公证
