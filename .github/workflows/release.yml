@@ -1,0 +1,106 @@
+name: Release macOS
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: node scripts/check-version.mjs
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npm run site:check
+  build:
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run smoke:electron
+      - name: Package (signed and notarized only when all Apple credentials are configured)
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          BUILD_ARCH: ${{ matrix.arch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "$CSC_LINK" && -n "$APPLE_ID" && -n "$APPLE_APP_SPECIFIC_PASSWORD" && -n "$APPLE_TEAM_ID" ]]; then
+            npx electron-builder --mac --"$BUILD_ARCH" --publish never -c.mac.notarize=true
+            app_path=$(find release -maxdepth 3 -name Tracelet.app -type d -print -quit)
+            codesign --verify --deep --strict "$app_path"
+            spctl --assess --type execute --verbose "$app_path"
+            echo signed > release/signing-status.txt
+          else
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+            unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
+            npx electron-builder --mac --"$BUILD_ARCH" --publish never -c.mac.notarize=false
+            echo unsigned > release/signing-status.txt
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-${{ matrix.arch }}
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/signing-status.txt
+          if-no-files-found: error
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: mac-*
+          path: artifacts
+      - name: Publish verified assets and checksum manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p publish
+          cp artifacts/mac-arm64/*.dmg artifacts/mac-arm64/*.zip artifacts/mac-x64/*.dmg artifacts/mac-x64/*.zip publish/
+          version=$(node -p "require('./package.json').version")
+          tag="v$version"
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "$tag" ]]; then exit 1; fi
+          cd publish
+          sha256sum *.dmg *.zip > SHA256SUMS.txt
+          cd ..
+          node scripts/release-notes.mjs > release-notes.md
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo 'This version already exists. Bump package.json rather than replacing published binaries.' >&2
+            exit 1
+          fi
+          gh release create "$tag" publish/* --target "$GITHUB_SHA" --title "Tracelet $tag" --notes-file release-notes.md

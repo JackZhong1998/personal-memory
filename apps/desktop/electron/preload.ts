@@ -1,0 +1,4 @@
+import { contextBridge, ipcRenderer } from 'electron';
+import type { Bridge } from './types';
+const api:Bridge={snapshot:()=>ipcRenderer.invoke('snapshot'),prompts:id=>ipcRenderer.invoke('prompts',id),settings:value=>ipcRenderer.invoke('settings',value),saveKey:key=>ipcRenderer.invoke('save-key',key),removeKey:()=>ipcRenderer.invoke('remove-key'),models:()=>ipcRenderer.invoke('models'),importFile:()=>ipcRenderer.invoke('import'),preview:ids=>ipcRenderer.invoke('preview',ids),analyze:(ids,digest)=>ipcRenderer.invoke('analyze',ids,digest),review:(id,status)=>ipcRenderer.invoke('review',id,status),exportData:()=>ipcRenderer.invoke('export'),eraseData:()=>ipcRenderer.invoke('erase'),openData:()=>ipcRenderer.invoke('open-data'),onChange:callback=>{ipcRenderer.on('changed',callback);return()=>{ipcRenderer.removeListener('changed',callback)}}};
+contextBridge.exposeInMainWorld('tracelet',api);

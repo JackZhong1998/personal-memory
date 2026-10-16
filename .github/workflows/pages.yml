@@ -1,0 +1,43 @@
+name: Deploy website
+on:
+  push:
+    branches: [main]
+    paths: ['site/**', 'scripts/release-manifest.mjs', '.github/workflows/pages.yml']
+  workflow_dispatch:
+  workflow_run:
+    workflows: [Release macOS]
+    types: [completed]
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node scripts/check-site.mjs
+      - name: Resolve real release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-manifest.mjs
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - uses: actions/deploy-pages@v4
+        id: deployment
