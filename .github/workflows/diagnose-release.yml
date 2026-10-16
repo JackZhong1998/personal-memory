@@ -26,7 +26,7 @@ jobs:
           gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --log-failed > /tmp/release-failure.log
           python3 - <<'PY'
           from pathlib import Path
-          for line in Path('/tmp/release-failure.log').read_text().splitlines()[-45:]:
+          for line in Path('/tmp/release-failure.log').read_text().splitlines()[-8:]:
               safe=line.replace('%','%25').replace('\r','%0D')
               print('::notice::'+safe)
           PY
