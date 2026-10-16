@@ -68,7 +68,8 @@ jobs:
             echo '::error::A release already exists; refusing to overwrite its binaries.'
             exit 1
           fi
-          if ! gh release create "$tag" publish/* --target "$SOURCE_SHA" --title "Tracelet $tag" --notes-file release-notes.md > /tmp/publish.log 2>&1; then
+          # The tag already exists and was verified above. Do not request creation of a tag at an older workflow commit.
+          if ! gh release create "$tag" publish/* --verify-tag --title "Tracelet $tag" --notes-file release-notes.md > /tmp/publish.log 2>&1; then
             while IFS= read -r line; do echo "::error::$line"; done < /tmp/publish.log
             exit 1
           fi

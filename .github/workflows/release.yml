@@ -102,4 +102,8 @@ jobs:
             echo 'This version already exists. Bump package.json rather than replacing published binaries.' >&2
             exit 1
           fi
-          gh release create "$tag" publish/* --target "$GITHUB_SHA" --title "Tracelet $tag" --notes-file release-notes.md
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            gh release create "$tag" publish/* --verify-tag --title "Tracelet $tag" --notes-file release-notes.md
+          else
+            gh release create "$tag" publish/* --target "$GITHUB_SHA" --title "Tracelet $tag" --notes-file release-notes.md
+          fi
