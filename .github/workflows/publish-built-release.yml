@@ -1,8 +1,5 @@
 name: Publish built release
 on:
-  push:
-    branches: [main]
-    paths: ['.github/workflows/publish-built-release.yml']
   workflow_dispatch:
     inputs:
       run_id:
@@ -26,7 +23,7 @@ jobs:
         id: source
         env:
           GH_TOKEN: ${{ github.token }}
-          SOURCE_RUN: ${{ inputs.run_id || '38981197408' }}
+          SOURCE_RUN: ${{ inputs.run_id }}
         run: |
           set -euo pipefail
           [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]]
