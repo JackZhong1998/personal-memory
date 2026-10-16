@@ -45,9 +45,8 @@ jobs:
       - name: Prepare exact architecture assets and checksums
         run: |
           set -euo pipefail
-          mkdir publish
+          node scripts/prepare-release.mjs
           for arch in arm64 x64; do
-            cp "artifacts/mac-$arch/Tracelet-mac-$arch.dmg" "artifacts/mac-$arch/Tracelet-mac-$arch.zip" publish/
             unzip -tq "publish/Tracelet-mac-$arch.zip"
           done
           cd publish
@@ -60,6 +59,7 @@ jobs:
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
           set -euo pipefail
+          git fetch --no-tags origin "$SOURCE_SHA"
           version=$(git show "$SOURCE_SHA:package.json" | node -e "let s='';process.stdin.on('data',b=>s+=b);process.stdin.on('end',()=>console.log(JSON.parse(s).version))")
           tag="v$version"
           git fetch --no-tags origin "refs/tags/$tag:refs/tags/$tag"

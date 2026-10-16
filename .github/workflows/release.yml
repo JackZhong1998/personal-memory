@@ -90,10 +90,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p publish
-          for arch in arm64 x64; do
-            cp "artifacts/mac-$arch/Tracelet-mac-$arch.dmg" "artifacts/mac-$arch/Tracelet-mac-$arch.zip" publish/
-          done
+          node scripts/prepare-release.mjs
           version=$(node -p "require('./package.json').version")
           tag="v$version"
           if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "$tag" ]]; then exit 1; fi
