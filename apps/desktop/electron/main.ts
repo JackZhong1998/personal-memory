@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { watch, type FSWatcher } from 'chokidar';
 import { Store } from './store';
 import { parseJSONL, parseExport } from './parsers';
-import { preview, digest, analyze } from './analyzer';
+import { preview, digest, analyze, sameScope } from './analyzer';
 import type { Settings } from './types';
 
 let window:BrowserWindow|null=null;let tray:Tray;let store:Store;let quitting=false;let watcher:FSWatcher|undefined;
@@ -62,9 +62,9 @@ function handlers(){
   let prompts;if(path.endsWith('.jsonl')){const provider: 'codex'|'claude'=raw.includes('"session_meta"')||raw.includes('"response_item"')||raw.includes('"event_msg"')?'codex':'claude';prompts=parseJSONL(raw,provider,path)}else prompts=parseExport(raw,path);
   if(!prompts.length)throw new Error('文件中没有可识别的用户提问');const added=await store.upsert(prompts);changed();return {added,message:`已同步 ${prompts.length} 条提问，新增 ${added} 条。`};
  });
- register('preview',(ids:unknown)=>{const p=preview(store.unanalyzed(selected(ids)),settings.model);return {...p,digest:digest(p)}});
- register('analyze',async(ids:unknown,approvedDigest:unknown)=>{if(busy)throw new Error('分析正在进行中');const p=preview(store.unanalyzed(selected(ids)),settings.model);if(digest(p)!==approvedDigest)throw new Error('内容已更新，请重新预览后再发送');if(!p.prompts.length)throw new Error('所选对话没有待分析的新提问');
-  const key=await getKey();if(!key)throw new Error('请先在设置中保存 API Key');busy=true;try{const memories=await analyze(p,key);const existing=new Set(store.memories().map(m=>m.claim.trim()));const novel=memories.filter(m=>!existing.has(m.claim.trim()));await store.addMemories(novel);await store.markAnalyzed(p.prompts);changed();return novel.length}finally{busy=false}
+ register('preview',(ids:unknown)=>{const p=preview(store.unanalyzed(selected(ids)),settings.model,store.memories());return {...p,digest:digest(p)}});
+ register('analyze',async(ids:unknown,approvedDigest:unknown)=>{if(busy)throw new Error('分析正在进行中');const p=preview(store.unanalyzed(selected(ids)),settings.model,store.memories());if(digest(p)!==approvedDigest)throw new Error('内容或参考记忆已更新，请重新预览后再发送');if(!p.prompts.length)throw new Error('所选对话没有待分析的新提问');
+  const key=await getKey();if(!key)throw new Error('请先在设置中保存 API Key');busy=true;try{const memories=await analyze(p,key);const existing=store.memories().filter(m=>m.status==='pending'||m.status==='accepted');const novel=memories.filter(m=>!existing.some(old=>old.claim.trim()===m.claim.trim()&&old.category===m.category&&sameScope(old.scope,m.scope)));await store.addMemories(novel);await store.markAnalyzed(p.prompts);changed();return novel.length}finally{busy=false}
  });
  register('review',async(id:unknown,status:unknown)=>{if(typeof id!=='string'||!['accepted','rejected'].includes(String(status)))throw new Error('审核参数无效');await store.review(id,status as 'accepted'|'rejected');changed()});
  register('export',async()=>{const file=await dialog.showSaveDialog({defaultPath:'tracelet-export.json',filters:[{name:'JSON',extensions:['json']}]});if(file.canceled||!file.filePath)return false;await writeFile(file.filePath,JSON.stringify({version:1,exportedAt:new Date().toISOString(),prompts:store.prompts(),memories:store.memories()},null,2),{mode:0o600});return true});
@@ -84,8 +84,17 @@ if(!app.requestSingleInstanceLock())app.quit();else{
    await window!.webContents.executeJavaScript(`window.tracelet.settings({watchCodex:true})`);
    const deadline=Date.now()+15000;let count=0;while(Date.now()<deadline){const s=await window!.webContents.executeJavaScript('window.tracelet.snapshot()');count=s.promptCount;if(count===2)break;await new Promise(r=>setTimeout(r,200))}
    if(count!==2)throw new Error('Smoke failed: watcher did not ingest exactly 2 prompts');
-   const rendered=await window!.webContents.executeJavaScript(`document.body.innerText.includes('你的提问')`);if(!rendered)throw new Error('Smoke failed: React UI did not render');
-   console.log('TRACELET_SMOKE_OK: real Electron window, preload IPC, SQLite/WASM, file watcher, React UI');app.quit();
+   const evidence=store.prompts();
+   await store.addMemories([{id:'smoke-memory',category:'preferences',claim:'这次对话希望使用中文回答',layer:'episode',scope:{kind:'conversation',label:'codex:smoke-conversation'},basis:'explicit',action:'add',rationale:'本次请求明确要求中文，保持会话范围。',evidenceIds:[evidence[0].id],evidence:[evidence[0]],evidenceQuotes:[{promptId:evidence[0].id,quote:evidence[0].text}],confidence:.95,status:'pending',createdAt:new Date().toISOString()}]);changed();
+   const uiDeadline=Date.now()+10000;let rendered=false;while(Date.now()<uiDeadline){rendered=await window!.webContents.executeJavaScript(`!!document.querySelector('.memory-workspace')&&document.body.innerText.includes('这次对话希望使用中文回答')&&document.body.innerText.includes('请用中文回答。')`);if(rendered)break;await new Promise(r=>setTimeout(r,100))}if(!rendered)throw new Error('Smoke failed: split workspace did not render real data');
+   await window!.webContents.executeJavaScript(`[...document.querySelectorAll('button')].find(b=>b.textContent.includes('定位提问')).click()`);
+   await new Promise(r=>setTimeout(r,200));if(!await window!.webContents.executeJavaScript(`!!document.querySelector('.source-prompt.highlighted')`))throw new Error('Smoke failed: evidence navigation');
+   if(process.env.TRACELET_SMOKE_SCREENSHOT)await writeFile(process.env.TRACELET_SMOKE_SCREENSHOT,(await window!.webContents.capturePage()).toPNG());
+   await window!.webContents.executeJavaScript(`[...document.querySelectorAll('.memory-card button')].find(b=>b.textContent==='确认记忆').click()`);
+   const reviewDeadline=Date.now()+5000;while(Date.now()<reviewDeadline&&store.memories()[0]?.status!=='accepted')await new Promise(r=>setTimeout(r,50));if(store.memories()[0]?.status!=='accepted')throw new Error('Smoke failed: human review');
+   await window!.webContents.executeJavaScript(`document.querySelector('.source-conversation input').click()`);await new Promise(r=>setTimeout(r,100));await window!.webContents.executeJavaScript(`[...document.querySelectorAll('.source-footer button')].find(b=>b.textContent.includes('预览')).click()`);
+   const previewDeadline=Date.now()+5000;let previewReady=false;while(Date.now()<previewDeadline){previewReady=await window!.webContents.executeJavaScript(`!!document.querySelector('.outbound-context')&&document.body.innerText.includes('tracelet-memory-v2')`);if(previewReady)break;await new Promise(r=>setTimeout(r,100))}if(!previewReady)throw new Error('Smoke failed: outgoing reference preview');
+   console.log('TRACELET_SMOKE_OK: watcher, SQLite/WASM, split workspace, evidence navigation, human review, exact outgoing preview; no AI request sent');app.quit();
   }
  }).catch(e=>{if(smoke){console.error('TRACELET_SMOKE_FAILED:',String(e.message));app.exit(1)}else{dialog.showErrorBox('Tracelet 启动失败',String(e.message));app.quit()}});
  app.on('activate',()=>{if(store)show()});

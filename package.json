@@ -1,8 +1,11 @@
 {
-  "name": "tracelet", "version": "0.1.0", "private": true,
+  "name": "tracelet",
+  "version": "0.2.0",
+  "private": true,
   "description": "A personal memory layer for your AI conversations",
   "main": "dist-electron/main.cjs",
-  "author": "Tracelet", "license": "MIT",
+  "author": "Tracelet",
+  "license": "MIT",
   "scripts": {
     "dev": "npm run build:main && concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron . --dev\"",
     "build:main": "node scripts/build-main.mjs",
@@ -10,16 +13,69 @@
     "test": "tsx --test apps/desktop/test/*.test.ts",
     "smoke:electron": "node scripts/smoke-electron.mjs",
     "site:check": "node scripts/check-site.mjs",
-    "dist:mac": "npm run build && electron-builder --mac --arm64 --x64 --publish never"
+    "dist:mac": "npm run build && electron-builder --mac --arm64 --x64 --publish never",
+    "eval:agent": "tsx scripts/evaluate-memory.ts"
   },
-  "dependencies": {"chokidar":"4.0.3","react":"19.1.0","react-dom":"19.1.0","sql.js":"1.13.0","zod":"3.24.2"},
-  "devDependencies": {"@types/node":"22.14.0","@types/react":"19.0.12","@types/react-dom":"19.0.4","@types/sql.js":"1.4.9","@vitejs/plugin-react":"6.1.2","concurrently":"9.1.2","electron":"44.8.0","electron-builder":"26.15.3","esbuild":"0.28.2","tsx":"4.19.3","typescript":"5.8.3","vite":"8.3.4","wait-on":"8.0.3"},
+  "dependencies": {
+    "chokidar": "4.0.3",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "sql.js": "1.13.0",
+    "zod": "3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "22.14.0",
+    "@types/react": "19.0.12",
+    "@types/react-dom": "19.0.4",
+    "@types/sql.js": "1.4.9",
+    "@vitejs/plugin-react": "6.1.2",
+    "concurrently": "9.1.2",
+    "electron": "44.8.0",
+    "electron-builder": "26.15.3",
+    "esbuild": "0.28.2",
+    "tsx": "4.19.3",
+    "typescript": "5.8.3",
+    "vite": "8.3.4",
+    "wait-on": "8.0.3"
+  },
   "build": {
-    "appId":"app.tracelet.desktop","productName":"Tracelet","directories":{"output":"release"},
-    "files":["dist/**/*","dist-electron/**/*","package.json"],
-    "asar":true,
-    "mac":{"category":"public.app-category.productivity","target":["dmg","zip"],"hardenedRuntime":true,"entitlements":"apps/desktop/entitlements.mac.plist","entitlementsInherit":"apps/desktop/entitlements.mac.plist","minimumSystemVersion":"13.0.0"},
-    "artifactName":"Tracelet-mac-${arch}.${ext}",
-    "dmg":{"title":"Tracelet","contents":[{"x":140,"y":180},{"x":420,"y":180,"type":"link","path":"/Applications"}]}
+    "appId": "app.tracelet.desktop",
+    "productName": "Tracelet",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "hardenedRuntime": true,
+      "entitlements": "apps/desktop/entitlements.mac.plist",
+      "entitlementsInherit": "apps/desktop/entitlements.mac.plist",
+      "minimumSystemVersion": "13.0.0"
+    },
+    "artifactName": "Tracelet-mac-${arch}.${ext}",
+    "dmg": {
+      "title": "Tracelet",
+      "contents": [
+        {
+          "x": 140,
+          "y": 180
+        },
+        {
+          "x": 420,
+          "y": 180,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    }
   }
 }

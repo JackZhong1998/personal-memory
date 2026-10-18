@@ -1,0 +1,4 @@
+import type {Memory,Prompt} from '../electron/types';
+export const prompt=(text='这次请用中文回答。',id='p1',conversationId='c1'):Prompt=>({id,text,conversationId,provider:'codex',conversationTitle:'示例对话',timestamp:'2026-10-18T00:00:00Z',source:'/private/test.jsonl'});
+export function proposal(p:Prompt,overrides:Record<string,unknown>={}){return {category:'preferences',claim:'当前对话使用中文',layer:'episode',scope:{kind:'conversation',label:`${p.provider}:${p.conversationId}`},basis:'explicit',action:'add',relatedMemoryId:null,evidenceIds:[p.id],evidenceQuotes:[{promptId:p.id,quote:p.text}],rationale:'用户明确提出本次对话要求，不提升为全局偏好。',confidence:.9,validFrom:null,expiresAt:null,...overrides}}
+export const existing=(overrides:Partial<Memory>={}):Memory=>({id:'old-1',category:'needs',claim:'Tracelet 首先支持 Mac',scope:{kind:'project',label:'Tracelet'},layer:'project',basis:'explicit',evidenceIds:['old-prompt'],confidence:1,status:'accepted',createdAt:'2026-10-17T00:00:00Z',...overrides});
