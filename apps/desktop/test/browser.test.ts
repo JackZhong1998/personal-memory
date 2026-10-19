@@ -60,7 +60,7 @@ test('Extension background preserves offline queue, enforces permissions, dedupl
  response=await send({type:'capture',packet:p});assert.equal(response.added,0);assert.equal(Object.keys(storage.records).length,1);
  const exported=await send({type:'export'},{id:extensionId});assert.equal(browserPrompts(exported.captures[0])[0].provider,'custom:custom-ai.example');assert.equal(exported.captures[0].messages[0].timestamp,undefined);
  assert.ok((await send({type:'export'},sender)).error);assert.ok((await send({type:'capture',packet:p},{...sender,frameId:1})).error);
- granted=false;assert.ok((await send({type:'capture',packet:p})).error);granted=true;
+ granted=false;assert.equal(await send({type:'config'}),null,'revoked origin must stop DOM reads before extraction');assert.ok((await send({type:'capture',packet:p})).error);granted=true;
  online=true;response=await send({type:'sync'},{id:extensionId});assert.equal(response.sent,1);assert.equal(Object.keys(storage.outbox).length,0);assert.equal(Object.keys(storage.records).length,1);
  await send({type:'save',origin,rule:{enabled:false,selector:'.user-message'}},{id:extensionId});assert.ok((await send({type:'capture',packet:p})).error);
 });

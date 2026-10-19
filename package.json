@@ -1,6 +1,6 @@
 {
   "name": "tracelet",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "description": "A personal memory layer for your AI conversations",
   "main": "dist-electron/main.cjs",

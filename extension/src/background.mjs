@@ -21,7 +21,7 @@ async function handle(message,sender){
  const extensionPage=!sender.tab&&sender.id===chrome.runtime.id;
  if(message.type==='config'){
   if(!sender.tab||sender.frameId!==0)return null;
-  const origin=new URL(cleanURL(sender.url)).origin;const {sites={}}=await chrome.storage.local.get('sites');return sites[origin]??null;
+  const origin=new URL(cleanURL(sender.url)).origin;if(!await chrome.permissions.contains({origins:[origin+'/*']}))return null;const {sites={}}=await chrome.storage.local.get('sites');return sites[origin]??null;
  }
  if(message.type==='capture-error'){
   if(!sender.tab||sender.frameId!==0)return null;const origin=new URL(cleanURL(sender.url)).origin;const {sites={}}=await chrome.storage.local.get('sites');if(sites[origin]?.enabled)await chrome.storage.local.set({lastError:typeof message.error==='string'?message.error.slice(0,200):'采集失败'});return {ok:true};
