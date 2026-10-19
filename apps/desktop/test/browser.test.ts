@@ -25,6 +25,10 @@ test('SQLite migrates v0.2 data and deduplicates browser retries, preserving fir
   const exportFile=JSON.stringify({format:'tracelet.browser-export.v1',captures:[packet({capturedAt:'2026-10-19T01:00:00Z'})]});assert.equal(await store.upsert(parseExport(exportFile,'export.json')),0);assert.equal(store.count(),2);assert.equal(store.prompts().find(p=>p.provider==='grok')!.timestamp,'2026-10-19T00:00:00Z');
   await store.markAnalyzed(browserPrompts(packet()));assert.equal(store.unanalyzed(browserPrompts(packet())).length,0);
   const edited=browserPrompts(packet({messages:[{id:'msg-1',role:'user',text:'请保留来源和证据。'}]}));assert.equal(await store.upsert(edited),0);assert.equal(store.unanalyzed(edited).length,1);assert.equal(store.count(),2);assert.equal(store.prompts().find(p=>p.provider==='grok')!.timeSource,'captured');
+  const newest=browserPrompts(packet({capturedAt:'2026-10-19T02:00:00Z',messages:[{id:'msg-1',role:'user',text:'离线编辑后的最新需求。'}]}));await store.upsert(newest);await store.upsert(browserPrompts(packet()));
+  assert.equal(store.prompts().find(p=>p.provider==='grok')!.text,'离线编辑后的最新需求。','older inbox packets must not overwrite newer edits');
+  assert.equal(store.prompts().find(p=>p.provider==='grok')!.capturedAt,'2026-10-19T02:00:00.000Z');
+
  }finally{store?.close();await rm(root,{recursive:true,force:true})}
 });
 test('Native host durably queues only when desktop browser sync is enabled',async()=>{

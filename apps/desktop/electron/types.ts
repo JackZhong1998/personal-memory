@@ -1,5 +1,5 @@
 export type Provider = 'codex' | 'claude' | 'chatgpt' | 'grok' | 'manus' | 'genspark' | `custom:${string}`;
-export interface Prompt {id:string; provider:Provider; conversationId:string; conversationTitle:string; text:string; timestamp:string; source:string; timeSource?:'platform'|'captured'}
+export interface Prompt {id:string; provider:Provider; conversationId:string; conversationTitle:string; text:string; timestamp:string; source:string; capturedAt?:string; timeSource?:'platform'|'captured'}
 export interface Trace {id:string; provider:Provider; title:string; count:number; updatedAt:string}
 export type MemoryCategory='identity'|'preferences'|'needs'|'procedures'|'events';
 export interface MemoryScope {kind:'global'|'project'|'conversation'; label:string}

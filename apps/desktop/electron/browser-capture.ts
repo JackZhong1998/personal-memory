@@ -9,7 +9,7 @@ export function browserPrompts(input:unknown):Prompt[]{
  if(url.protocol!=='https:'||url.username||url.password||url.port&&url.port!=='443')throw new Error('浏览器来源必须是标准 HTTPS 页面');
  const provider=webProvider(url);url.search='';url.hash='';
  const conversationId='web:'+packet.conversationId;
- return packet.messages.map(m=>({id:hash(`${provider}:${conversationId}:${m.id}`),provider,conversationId,conversationTitle:packet.title||url.hostname,text:m.text,timestamp:m.timestamp??m.capturedAt??packet.capturedAt,source:url.href,timeSource:m.timestamp?'platform':'captured'}));
+ return packet.messages.map(m=>({id:hash(`${provider}:${conversationId}:${m.id}`),provider,conversationId,conversationTitle:packet.title||url.hostname,text:m.text,timestamp:m.timestamp??m.capturedAt??packet.capturedAt,source:url.href,capturedAt:new Date(m.capturedAt??packet.capturedAt).toISOString(),timeSource:m.timestamp?'platform':'captured'}));
 }
 export function parseBrowserExport(input:unknown):Prompt[]{
  const data=z.object({format:z.literal('tracelet.browser-export.v1'),captures:z.array(z.unknown()).max(10000)}).parse(input);
