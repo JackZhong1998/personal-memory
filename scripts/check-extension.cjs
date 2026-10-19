@@ -19,5 +19,5 @@ app.whenReady().then(async()=>{
  return {messages:first.messages.length,packets:packets.length};
  })()`);
  console.log('BROWSER_DOM_OK: submitted messages, no draft/assistant, nested dedup, edits, SPA, custom query sessions, bounded native frames',JSON.stringify(state));page.destroy();app.quit();
-}).catch(e=>{console.error('BROWSER_DOM_FAILED:',e.message);app.exit(1)});
+}).catch(e=>{console.error('::error::BROWSER_DOM_FAILED: '+e.message);app.exit(1)});
 app.on('will-quit',()=>rmSync(root,{recursive:true,force:true}));

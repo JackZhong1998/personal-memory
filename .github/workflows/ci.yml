@@ -20,5 +20,5 @@ jobs:
       - run: npm run build
       - run: npm run site:check
       - run: xvfb-run -a npm run smoke:electron
-      - run: xvfb-run -a npm run check:workspace -- --no-sandbox
-      - run: xvfb-run -a npm run check:browser -- --no-sandbox
+      - run: npm run check:workspace -- --no-sandbox --ozone-platform=headless --disable-gpu
+      - run: npm run check:browser -- --no-sandbox --ozone-platform=headless --disable-gpu

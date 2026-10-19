@@ -41,4 +41,4 @@ app.whenReady().then(async()=>{const page=new BrowserWindow({width:1440,height:1
  await click(`[...document.querySelectorAll('.memory-card button')].find(b=>b.textContent.includes('定位提问')).click()`);
  if(!await page.webContents.executeJavaScript(`!!document.querySelector('.source-prompt.highlighted')`))throw new Error('Locate failed');
  console.log('INTERACTION_OK: platform isolation, selection reset, categories, layers, evidence navigation');page.destroy();app.quit();
-}).catch(e=>{console.error(e);app.exit(1)});app.on('will-quit',()=>rmSync(root,{recursive:true,force:true}));
+}).catch(e=>{console.error('::error::'+e.message);app.exit(1)});app.on('will-quit',()=>rmSync(root,{recursive:true,force:true}));
