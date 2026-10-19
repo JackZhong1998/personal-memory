@@ -1,4 +1,5 @@
 const {app,BrowserWindow}=require('electron');
+app.disableHardwareAcceleration();
 const {mkdtempSync,writeFileSync,rmSync,mkdirSync}=require('node:fs');const {tmpdir}=require('node:os');const {join,resolve}=require('node:path');
 const project=resolve(__dirname,'..');
 const root=mkdtempSync(join(tmpdir(),'tracelet-visual-'));app.setPath('userData',join(root,'data'));
@@ -23,7 +24,7 @@ const memories=[
 const traces=[...new Set(prompts.map(p=>p.provider+':'+p.conversationId))].map(id=>{const rows=prompts.filter(p=>p.provider+':'+p.conversationId===id);return {id,provider:rows[0].provider,title:rows[0].conversationTitle,count:rows.length,updatedAt:rows.at(-1).timestamp}});
 const snapshot={traces,memories,promptCount:prompts.length,errors:[],settings:{watchCodex:true,watchClaude:true,model:'deepseek/deepseek-v4-flash',keyPresent:false,keyStorageAvailable:true,paused:false}};
 writeFileSync(join(root,'preload.cjs'),`const {contextBridge}=require('electron');const snapshot=${JSON.stringify(snapshot)};const prompts=${JSON.stringify(prompts)};contextBridge.exposeInMainWorld('tracelet',{snapshot:async()=>snapshot,prompts:async id=>prompts.filter(p=>p.provider+':'+p.conversationId===id),onChange:()=>()=>{}});`);
-app.whenReady().then(async()=>{const page=new BrowserWindow({width:1440,height:1050,show:false,webPreferences:{preload:join(root,'preload.cjs'),sandbox:true,contextIsolation:true,nodeIntegration:false}});await page.loadFile(join(project,'dist/index.html'));await new Promise(r=>setTimeout(r,350));
+app.whenReady().then(async()=>{const page=new BrowserWindow({width:1440,height:1050,show:false,webPreferences:{offscreen:true,backgroundThrottling:false,preload:join(root,'preload.cjs'),sandbox:true,contextIsolation:true,nodeIntegration:false}});await page.loadFile(join(project,'dist/index.html'));await new Promise(r=>setTimeout(r,350));
  for(const [name,width,height] of [['wide',1440,1050],['compact',1024,900]]){page.setSize(width,height);await new Promise(r=>setTimeout(r,180));const state=await page.webContents.executeJavaScript(`({overflow:document.documentElement.scrollWidth>innerWidth,sources:document.querySelectorAll('.source-conversation').length,groups:document.querySelectorAll('.source-group').length,cards:document.querySelectorAll('.memory-card').length,background:getComputedStyle(document.documentElement).backgroundColor})`);if(state.overflow||state.sources!==5||state.groups!==4||state.cards!==9||state.background!=='rgb(255, 255, 255)')throw new Error(JSON.stringify(state));
  mkdirSync(join(project,'.local'),{recursive:true});writeFileSync(join(project,`.local/workspace-pro-${name}.png`),(await page.webContents.capturePage()).toPNG());console.log('LAYOUT_OK',name,JSON.stringify(state))}
  const click=async code=>{await page.webContents.executeJavaScript(code);await new Promise(r=>setTimeout(r,150))};

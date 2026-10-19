@@ -16,6 +16,7 @@ let browserWatcher:FSWatcher|undefined;
 let errors:string[]=[];let busy=false;let queue=Promise.resolve();
 const dev=process.argv.includes('--dev')&&!app.isPackaged;
 const smoke=process.argv.includes('--smoke')&&!app.isPackaged;
+if(smoke)app.disableHardwareAcceleration();
 if(smoke&&process.env.TRACELET_SMOKE_DATA)app.setPath('userData',process.env.TRACELET_SMOKE_DATA);
 const dataDir=()=>app.getPath('userData');
 const keyFile=()=>join(dataDir(),'openrouter.key');
@@ -26,7 +27,7 @@ async function getKey(){try{return safeStorage.decryptString(await readFile(keyF
 async function keyPresent(){try{await stat(keyFile());return true}catch{return false}}
 async function publicSettings(){return {...settings,keyPresent:await keyPresent(),keyStorageAvailable:safeStorage.isEncryptionAvailable()}}
 function show(){if(window){window.show();window.focus();return}
- window=new BrowserWindow({width:1250,height:850,minWidth:960,minHeight:680,title:'Tracelet · 你的个人记忆层',backgroundColor:'#ffffff',webPreferences:{preload:join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
+ window=new BrowserWindow({width:1250,height:850,minWidth:960,minHeight:680,title:'Tracelet · 你的个人记忆层',show:!smoke,backgroundColor:'#ffffff',webPreferences:{...(smoke?{offscreen:true,backgroundThrottling:false}:{}),preload:join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
  window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
  window.webContents.on('will-navigate',e=>e.preventDefault());
  window.on('close',e=>{if(!quitting){e.preventDefault();window?.hide()}});
@@ -128,7 +129,7 @@ if(!app.requestSingleInstanceLock())app.quit();else{
    const browserPrompt=store.prompts().find(p=>p.provider==='grok');if(store.count()!==3||browserPrompt?.timeSource!=='captured'||browserPrompt?.source!=='https://grok.com/c/smoke')throw new Error('Smoke failed: native inbox watcher');
    console.log('TRACELET_SMOKE_OK: watcher, SQLite/WASM, split workspace, evidence navigation, human review, exact outgoing preview, compiled native host and browser inbox; no AI request sent');app.quit();
   }
- }).catch(e=>{if(smoke){console.error('TRACELET_SMOKE_FAILED:',String(e.message));app.exit(1)}else{dialog.showErrorBox('Tracelet 启动失败',String(e.message));app.quit()}});
+ }).catch(e=>{if(smoke){console.error('::error::TRACELET_SMOKE_FAILED: '+String(e.message));app.exit(1)}else{dialog.showErrorBox('Tracelet 启动失败',String(e.message));app.quit()}});
  app.on('activate',()=>{if(store)show()});
  app.on('before-quit',()=>{quitting=true;void watcher?.close();void browserWatcher?.close()});
  app.on('window-all-closed',()=>{});

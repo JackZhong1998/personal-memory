@@ -1,9 +1,10 @@
 const {app,BrowserWindow}=require('electron');
+app.disableHardwareAcceleration();
 const {build}=require('esbuild');const {mkdtempSync,rmSync,writeFileSync}=require('node:fs');const {tmpdir}=require('node:os');const {join,resolve}=require('node:path');
 const root=mkdtempSync(join(tmpdir(),'tracelet-browser-ui-'));app.setPath('userData',root);
 app.whenReady().then(async()=>{
  const result=await build({entryPoints:[resolve('extension/src/core.mjs')],bundle:true,write:false,format:'iife',globalName:'CaptureCore'});
- const page=new BrowserWindow({show:false,webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false}});writeFileSync(join(root,'fixture.html'),'<!doctype html><html><body></body></html>');await page.loadFile(join(root,'fixture.html'));await page.webContents.executeJavaScript(result.outputFiles[0].text);
+ const page=new BrowserWindow({show:false,webPreferences:{offscreen:true,backgroundThrottling:false,sandbox:true,contextIsolation:true,nodeIntegration:false}});writeFileSync(join(root,'fixture.html'),'<!doctype html><html><body></body></html>');await page.loadFile(join(root,'fixture.html'));await page.webContents.executeJavaScript(result.outputFiles[0].text);
  const state=await page.webContents.executeJavaScript(`(async()=>{
  const assert=(ok,name)=>{if(!ok)throw new Error(name)};
  document.body.innerHTML='<div class="user-message" data-message-id="1"><div class="body">请用中文回答。</div></div><div data-role="assistant">助手回答</div><textarea>未发送草稿</textarea><div class="user-message" contenteditable="true">未发送内容</div><div class="user-message" data-message-id="2"><div class="body">请用中文回答。</div></div><div class="user-message"><div class="user-message" data-message-id="3"><div class="body">嵌套消息</div></div></div><div class="user-message" data-role="assistant">不采集</div>';
