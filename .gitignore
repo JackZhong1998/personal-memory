@@ -7,3 +7,5 @@ release/
 .env*
 !.env.example
 .local/
+
+browser-extension/

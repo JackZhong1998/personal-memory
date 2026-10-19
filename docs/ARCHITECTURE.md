@@ -1,6 +1,6 @@
 # 产品与 Agent 设计
 
-> 0.2.0 已实现左右对照工作台和 Memory Curator v2。新版完整协议、研究映射与评测边界见 [MEMORY_AGENT.md](MEMORY_AGENT.md)，下文历史设计以该协议为准。
+> 0.3.0 新增显式授权的浏览器扩展与原生同步，范围及限制见 [BROWSER_CAPTURE.md](BROWSER_CAPTURE.md)。0.2.0 已实现左右对照工作台和 Memory Curator v2。新版完整协议、研究映射与评测边界见 [MEMORY_AGENT.md](MEMORY_AGENT.md)，下文历史设计以该协议为准。
 
 ## 产品边界
 
@@ -25,7 +25,7 @@ flowchart LR
 
 ## 采集与 trace
 
-- 不从 macOS Accessibility 获取整屏文本，也不截获键盘。平台原生结构化日志能提供更稳定的对话与消息身份。未来网页接入应做显式授权的浏览器扩展，通过内容脚本获取已提交用户消息；每个平台需要专门适配、测试和域名授权，避免泛化抓取整个网页。
+- 不从 macOS Accessibility 获取整屏文本，也不截获键盘。平台原生结构化日志能提供更稳定的对话与消息身份。网页接入现采用显式授权的浏览器扩展，通过内容脚本获取已提交用户消息；每个平台需要专门适配、测试和域名授权，避免泛化抓取整个网页。
 - 目录监听通过 chokidar，等待文件写入稳定后读取。不存在的来源目录可在后续创建；不跟随符号链接。单文件限制 100 MB。当前读取整个变更文件；大规模使用可升级为 byte-offset 增量 tail，记录 inode/mtime/offset 并处理 truncate/rotation。
 - Prompt 字段：`id / provider / conversationId / conversationTitle / text / timestamp / source`。本地路径仅留在本机。
 - 稳定 ID 为 SHA-256(platform + conversation ID + native message ID)。没有原生 ID 时，用用户消息序号；缺少 conversation ID 时退到来源路径摘要。原生 ID 存在时，跨文件拷贝也能去重。
@@ -59,4 +59,4 @@ v2 支持模型基于已预览上下文提出语义重复、更新及冲突；�
 
 Electron + React 适合当前 Linux 开发 / Mac runner 打包流程。sql.js 使解析和持久化测试不依赖原生 ABI，采用单进程写入和串行原子替换数据库文件。代价是整库在内存，每次持久化导出整库；大量长期数据应迁移至原生 SQLite WAL、分页查询与 FTS5，需保留迁移备份并验证 ABI。
 
-阶段二：浏览器扩展、原生 SQLite 和全文检索、按敏感内容筛选/遮蔽后授权、冲突审阅、只读 MCP、代码签名/公证与更新签名。阶段三：跨设备加密同步，需要独立的密钥恢复和权限设计；不会将“同步”等同于云端明文上传。
+阶段二：完善网站适配、原生 SQLite 和全文检索、按敏感内容筛选/遮蔽后授权、冲突审阅、只读 MCP、代码签名/公证与更新签名。阶段三：跨设备加密同步，需要独立的密钥恢复和权限设计；不会将“同步”等同于云端明文上传。

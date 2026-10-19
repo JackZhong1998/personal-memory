@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Prompt, Provider } from './types';
+import {parseBrowserExport} from './browser-capture';
 type Row = Record<string, any>;
 export const hash = (value:string) => createHash('sha256').update(value).digest('hex');
 const textOf = (content:unknown):string => {
@@ -33,7 +34,7 @@ export function parseJSONL(raw:string,provider:'codex'|'claude',source:string):P
  return result;
 }
 export function parseExport(raw:string,source:string):Prompt[]{
- const data=JSON.parse(raw);const conversations=Array.isArray(data)?data:Array.isArray(data.conversations)?data.conversations:[data];const result:Prompt[]=[];
+ const data=JSON.parse(raw);if(data.format==='tracelet.browser-export.v1')return parseBrowserExport(data);const conversations=Array.isArray(data)?data:Array.isArray(data.conversations)?data.conversations:[data];const result:Prompt[]=[];
  for(const c of conversations){
   let provider:Provider;let messages:Row[];
   if(c.mapping&&typeof c.mapping==='object'){provider='chatgpt';messages=Object.values(c.mapping).map((n:any)=>n.message).filter(Boolean)}

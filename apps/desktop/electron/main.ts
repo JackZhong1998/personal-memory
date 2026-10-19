@@ -1,15 +1,18 @@
 import { app, BrowserWindow, ipcMain, dialog, safeStorage, Tray, Menu, nativeImage, shell } from 'electron';
-import { readFile, writeFile, mkdir, rename, unlink, stat } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename, unlink, stat, readdir, chmod } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import {spawn} from 'node:child_process';
 import { homedir } from 'node:os';
 import { watch, type FSWatcher } from 'chokidar';
+import {browserPrompts,frame} from './browser-capture';
 import { Store } from './store';
 import { parseJSONL, parseExport } from './parsers';
 import { preview, digest, analyze, sameScope } from './analyzer';
 import type { Settings } from './types';
 
 let window:BrowserWindow|null=null;let tray:Tray;let store:Store;let quitting=false;let watcher:FSWatcher|undefined;
-let settings:Omit<Settings,'keyPresent'|'keyStorageAvailable'>={watchCodex:false,watchClaude:false,model:'deepseek/deepseek-v4-flash',paused:false};
+let settings:Omit<Settings,'keyPresent'|'keyStorageAvailable'>={watchCodex:false,watchClaude:false,watchBrowser:false,model:'deepseek/deepseek-v4-flash',paused:false};
+let browserWatcher:FSWatcher|undefined;
 let errors:string[]=[];let busy=false;let queue=Promise.resolve();
 const dev=process.argv.includes('--dev')&&!app.isPackaged;
 const smoke=process.argv.includes('--smoke')&&!app.isPackaged;
@@ -23,7 +26,7 @@ async function getKey(){try{return safeStorage.decryptString(await readFile(keyF
 async function keyPresent(){try{await stat(keyFile());return true}catch{return false}}
 async function publicSettings(){return {...settings,keyPresent:await keyPresent(),keyStorageAvailable:safeStorage.isEncryptionAvailable()}}
 function show(){if(window){window.show();window.focus();return}
- window=new BrowserWindow({width:1250,height:850,minWidth:960,minHeight:680,title:'Tracelet · 你的个人记忆层',backgroundColor:'#f7f7f2',webPreferences:{preload:join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
+ window=new BrowserWindow({width:1250,height:850,minWidth:960,minHeight:680,title:'Tracelet · 你的个人记忆层',backgroundColor:'#ffffff',webPreferences:{preload:join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
  window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
  window.webContents.on('will-navigate',e=>e.preventDefault());
  window.on('close',e=>{if(!quitting){e.preventDefault();window?.hide()}});
@@ -36,7 +39,17 @@ async function ingest(path:string,provider:'codex'|'claude'){
  if((await stat(path)).size>100*1024*1024)throw new Error('跳过超过 100 MB 的对话文件：'+path);
  const prompts=parseJSONL(await readFile(path,'utf8'),provider,path);await store.upsert(prompts);changed();
 }
-async function startWatch(){await watcher?.close();watcher=undefined;if(settings.paused)return;
+async function ingestBrowser(file:string){
+ if(settings.paused||!settings.watchBrowser||!file.endsWith('.json'))return;
+ if((await stat(file)).size>1024*1024)throw new Error('浏览器数据包超过限制');
+ await store.upsert(browserPrompts(JSON.parse(await readFile(file,'utf8'))));await unlink(file);changed();
+}
+async function startWatch(){await browserWatcher?.close();browserWatcher=undefined;
+ if(settings.watchBrowser&&!settings.paused){const inbox=join(dataDir(),'browser-inbox');await mkdir(inbox,{recursive:true,mode:0o700});
+ browserWatcher=watch(inbox,{ignoreInitial:false,followSymlinks:false,awaitWriteFinish:{stabilityThreshold:300,pollInterval:100}});
+ browserWatcher.on('add',file=>{queue=queue.then(()=>ingestBrowser(file)).catch(report)}).on('error',report);
+ }
+ await watcher?.close();watcher=undefined;if(settings.paused)return;
  const paths:{path:string;provider:'codex'|'claude'}[]=[];
  if(settings.watchCodex)paths.push({path:resolve(process.env.CODEX_HOME||join(homedir(),'.codex'),'sessions'),provider:'codex'});
  if(settings.watchClaude)paths.push({path:join(homedir(),'.claude','projects'),provider:'claude'});
@@ -50,7 +63,7 @@ function handlers(){
  register('snapshot',async()=>({traces:store.traces(),memories:store.memories(),settings:await publicSettings(),errors,promptCount:store.count()}));
  register('prompts',(id:unknown)=>{if(typeof id!=='string')throw new Error('对话 ID 无效');return store.prompts(id)});
  register('settings',async(value:unknown)=>{if(!value||typeof value!=='object')throw new Error('设置无效');const v=value as Record<string,unknown>;
-  for(const key of ['watchCodex','watchClaude','paused'] as const){if(key in v){if(typeof v[key]!=='boolean')throw new Error('设置无效');settings[key]=v[key]}}
+  for(const key of ['watchCodex','watchClaude','watchBrowser','paused'] as const){if(key in v){if(typeof v[key]!=='boolean')throw new Error('设置无效');settings[key]=v[key]}}
   if('model' in v){if(typeof v.model!=='string'||!v.model.trim()||v.model.length>200)throw new Error('模型 ID 无效');settings.model=v.model.trim()}
   await atomic(join(dataDir(),'settings.json'),JSON.stringify(settings));await startWatch();changed();
  });
@@ -68,13 +81,25 @@ function handlers(){
  });
  register('review',async(id:unknown,status:unknown)=>{if(typeof id!=='string'||!['accepted','rejected'].includes(String(status)))throw new Error('审核参数无效');await store.review(id,status as 'accepted'|'rejected');changed()});
  register('export',async()=>{const file=await dialog.showSaveDialog({defaultPath:'tracelet-export.json',filters:[{name:'JSON',extensions:['json']}]});if(file.canceled||!file.filePath)return false;await writeFile(file.filePath,JSON.stringify({version:1,exportedAt:new Date().toISOString(),prompts:store.prompts(),memories:store.memories()},null,2),{mode:0o600});return true});
- register('erase',async()=>{if(busy)throw new Error('请等待分析结束后再清空数据');const answer=await dialog.showMessageBox({type:'warning',message:'删除所有本地提问与记忆？',detail:'采集将暂停。原始平台文件不会被删除；重新开启采集会再次导入。此操作无法撤销。',buttons:['取消','删除'],defaultId:0,cancelId:0});if(answer.response!==1)return false;settings.paused=true;await atomic(join(dataDir(),'settings.json'),JSON.stringify(settings));await startWatch();await queue;await store.erase();changed();return true});
+ register('erase',async()=>{if(busy)throw new Error('请等待分析结束后再清空数据');const answer=await dialog.showMessageBox({type:'warning',message:'删除所有本地提问与记忆？',detail:'采集将暂停。原始平台文件不会被删除；重新开启采集会再次导入。此操作无法撤销。',buttons:['取消','删除'],defaultId:0,cancelId:0});if(answer.response!==1)return false;settings.paused=true;await atomic(join(dataDir(),'settings.json'),JSON.stringify(settings));await startWatch();await queue;await store.erase();for(const file of await readdir(join(dataDir(),'browser-inbox')).catch(()=>[]))if(file.endsWith('.json')||file.endsWith('.tmp'))await unlink(join(dataDir(),'browser-inbox',file));changed();return true});
+ register('open-extension',()=>shell.openPath(app.isPackaged?join(process.resourcesPath,'browser-extension'):join(__dirname,'../browser-extension')));
+ register('pair-browser',async(id:unknown,browser:unknown)=>{
+  if(process.platform!=='darwin')throw new Error('桌面配对目前支持 macOS');
+  if(typeof id!=='string'||! /^[a-p]{32}$/.test(id)||!['chrome','edge'].includes(String(browser)))throw new Error('请输入扩展管理页面中的 32 位扩展 ID');
+  const quote=(v:string)=>"'"+v.replaceAll("'", "'\\''")+"'";
+  const host=app.isPackaged?join(process.resourcesPath,'bridge/browser-host.cjs'):join(__dirname,'browser-host.cjs');
+  const launcher=join(dataDir(),'browser-host.sh');
+  await atomic(launcher,'#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec '+quote(process.execPath)+' '+quote(host)+' --data-dir '+quote(dataDir())+'\n');await chmod(launcher,0o700);
+  const folder=join(homedir(),'Library/Application Support',browser==='chrome'?'Google/Chrome':'Microsoft Edge','NativeMessagingHosts');await mkdir(folder,{recursive:true});
+  await atomic(join(folder,'app.tracelet.browser.json'),JSON.stringify({name:'app.tracelet.browser',description:'Tracelet local browser capture',path:launcher,type:'stdio',allowed_origins:[`chrome-extension://${id}/`]}));
+  settings.watchBrowser=true;await atomic(join(dataDir(),'settings.json'),JSON.stringify(settings));await startWatch();changed();
+ });
  register('open-data',()=>shell.openPath(dataDir()));
 }
 if(!app.requestSingleInstanceLock())app.quit();else{
  app.on('second-instance',show);
  app.whenReady().then(async()=>{await mkdir(dataDir(),{recursive:true,mode:0o700});
-  try{const saved=JSON.parse(await readFile(join(dataDir(),'settings.json'),'utf8'));for(const key of ['watchCodex','watchClaude','paused'] as const)if(typeof saved[key]==='boolean')settings[key]=saved[key];if(typeof saved.model==='string'&&saved.model.trim())settings.model=saved.model}catch(e:any){if(e.code!=='ENOENT')report(new Error('设置文件损坏，已使用默认设置。'))}
+  try{const saved=JSON.parse(await readFile(join(dataDir(),'settings.json'),'utf8'));for(const key of ['watchCodex','watchClaude','watchBrowser','paused'] as const)if(typeof saved[key]==='boolean')settings[key]=saved[key];if(typeof saved.model==='string'&&saved.model.trim())settings.model=saved.model}catch(e:any){if(e.code!=='ENOENT')report(new Error('设置文件损坏，已使用默认设置。'))}
   store=await new Store(join(dataDir(),'tracelet.sqlite')).open();handlers();
   const icon=nativeImage.createFromDataURL('data:image/svg+xml;base64,'+Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22"><path d="M4 5h8a5 5 0 0 1 0 10H7m0-5v10m-4-4 4 4 4-4" fill="none" stroke="black" stroke-width="2" stroke-linecap="round"/></svg>').toString('base64'));
   if(!(smoke&&process.platform==='linux'&&!process.env.DISPLAY)){tray=new Tray(icon);tray.setTitle('⌁');tray.setToolTip('Tracelet · 个人记忆');tray.setContextMenu(Menu.buildFromTemplate([{label:'打开 Tracelet',click:show},{label:'退出',click:()=>app.quit()}]));tray.on('click',show)}
@@ -94,10 +119,17 @@ if(!app.requestSingleInstanceLock())app.quit();else{
    const reviewDeadline=Date.now()+5000;while(Date.now()<reviewDeadline&&store.memories()[0]?.status!=='accepted')await new Promise(r=>setTimeout(r,50));if(store.memories()[0]?.status!=='accepted')throw new Error('Smoke failed: human review');
    await window!.webContents.executeJavaScript(`document.querySelector('.source-conversation input').click()`);await new Promise(r=>setTimeout(r,100));await window!.webContents.executeJavaScript(`[...document.querySelectorAll('.source-footer button')].find(b=>b.textContent.includes('预览')).click()`);
    const previewDeadline=Date.now()+5000;let previewReady=false;while(Date.now()<previewDeadline){previewReady=await window!.webContents.executeJavaScript(`!!document.querySelector('.outbound-context')&&document.body.innerText.includes('tracelet-memory-v2')`);if(previewReady)break;await new Promise(r=>setTimeout(r,100))}if(!previewReady)throw new Error('Smoke failed: outgoing reference preview');
-   console.log('TRACELET_SMOKE_OK: watcher, SQLite/WASM, split workspace, evidence navigation, human review, exact outgoing preview; no AI request sent');app.quit();
+   await window!.webContents.executeJavaScript('window.tracelet.settings({watchBrowser:true})');
+   const browserPacket={format:'tracelet.browser.capture.v1',url:'https://grok.com/c/smoke',conversationId:'b'.repeat(64),title:'Browser smoke',capturedAt:'2026-10-19T00:00:00Z',messages:[{id:'browser-smoke',role:'user',text:'浏览器采集保留来源。'}]};
+   const host=spawn(process.execPath,[join(__dirname,'browser-host.cjs'),'--data-dir',dataDir()],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1'},stdio:['pipe','pipe','pipe']});const responses:Buffer[]=[];host.stdout.on('data',b=>responses.push(b));host.stdin.end(frame(browserPacket));
+   const hostTimer=setTimeout(()=>host.kill('SIGKILL'),10000);const hostCode=await new Promise(resolve=>{host.on('error',()=>resolve(1));host.on('close',resolve)});clearTimeout(hostTimer);
+   const response=Buffer.concat(responses);if(hostCode!==0||response.length<4||!JSON.parse(response.subarray(4,4+response.readUInt32LE()).toString()).ok)throw new Error('Smoke failed: compiled browser native host');
+   const browserDeadline=Date.now()+5000;while(Date.now()<browserDeadline&&store.count()!==3)await new Promise(r=>setTimeout(r,100));
+   const browserPrompt=store.prompts().find(p=>p.provider==='grok');if(store.count()!==3||browserPrompt?.timeSource!=='captured'||browserPrompt?.source!=='https://grok.com/c/smoke')throw new Error('Smoke failed: native inbox watcher');
+   console.log('TRACELET_SMOKE_OK: watcher, SQLite/WASM, split workspace, evidence navigation, human review, exact outgoing preview, compiled native host and browser inbox; no AI request sent');app.quit();
   }
  }).catch(e=>{if(smoke){console.error('TRACELET_SMOKE_FAILED:',String(e.message));app.exit(1)}else{dialog.showErrorBox('Tracelet 启动失败',String(e.message));app.quit()}});
  app.on('activate',()=>{if(store)show()});
- app.on('before-quit',()=>{quitting=true;void watcher?.close()});
+ app.on('before-quit',()=>{quitting=true;void watcher?.close();void browserWatcher?.close()});
  app.on('window-all-closed',()=>{});
 }

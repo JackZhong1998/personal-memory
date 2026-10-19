@@ -4,11 +4,11 @@
 
 首版产品和官网已包含在此仓库。网站下载按钮读取发布清单，只有真实 Release 同时具有两个架构的 DMG 和校验文件时才启用。
 
-## 0.2.0 工作台与 Memory Curator v2
+## 0.3.0 来源分类与浏览器采集
 
 应用默认打开左右对照工作台：左侧查看对话原文，右侧按层级与状态查看记忆，支持定位证据、审核更新和查看历史。新版提炼区分长期个人、项目和会话情节，附逐字引文、范围与新增/更新/冲突/重复建议。相关旧记忆也会列入发送预览；替换必须手动确认。旧记录保留并显示未分层，旧提问可经用户选择后重新分析。
 
-提示词、论文设计映射、已实现边界及真实模型评测方式见 [Memory Curator v2](docs/MEMORY_AGENT.md)。
+界面使用白底圆角卡片，来源按平台分类；跨平台记忆展示所有证据来源。提示词、论文设计映射、已实现边界及真实模型评测方式见 [Memory Curator v2](docs/MEMORY_AGENT.md)。
 
 ## 采集能力
 
@@ -20,7 +20,9 @@
 | Claude 网页版 | 导入 JSON | conversations 数组中的 `chat_messages`，sender 为 human/user |
 | Grok | 导入 JSON | `messages` 数组，role 为 user，content 为文本；导出格式不同需适配 |
 
-采集默认关闭。首版不监听浏览器、键盘、屏幕，不提供 MCP 或自动将记忆注入第三方平台。文件布局可能随平台版本变化；解析异常会显示在应用中。JSONL 最后一条未写完时等待后续更新，不把半条内容当成新消息。
+| 浏览器 AI 网站 / 自定义 HTTPS 站点 | Chrome / Edge 扩展 + Native Messaging / JSON 导出 | 当前页面已加载的用户文本；规则须预览验证 |
+
+采集默认关闭。新增 Chrome / Edge 扩展，支持逐站授权、用户消息预览、本地队列与 Mac 原生同步，详见 [浏览器采集说明](docs/BROWSER_CAPTURE.md)。内置 Claude、Grok、Manus、Genspark、ChatGPT 规则为待验证模板，自定义来源按域名独立分类。应用不监听键盘或屏幕，不提供 MCP 或自动将记忆注入第三方平台。文件布局可能随平台版本变化；解析异常会显示在应用中。JSONL 最后一条未写完时等待后续更新，不把半条内容当成新消息。
 
 ## 本地开发
 
@@ -54,7 +56,7 @@ Linux 图形冒烟测试：`xvfb-run -a npm run smoke:electron`。Mac：`npm run
 详见 [发布指南](docs/RELEASING.md)。仓库带有三个 GitHub Actions：
 
 - `Validate`：类型检查、单元测试、构建、官网检查和 Electron 冒烟测试。
-- `Release macOS`：在 Apple Silicon / Intel Mac runner 构建 DMG、ZIP 与 SHA-256 校验文件，发布 GitHub Release；也可手动运行。
+- `Release macOS`：在 Apple Silicon / Intel Mac runner 构建 DMG、ZIP 与 SHA-256 校验文件，发布 GitHub Release，附浏览器扩展 ZIP；也可手动运行。
 - `Deploy website`：部署 GitHub Pages，并从最新真实 Release 生成下载清单。
 
 本机 Mac 打包：`npm run dist:mac`。输出到 `release/`。未配置 Apple 证书时是未签名/未公证的测试包。正式分发应配置 Developer ID 签名与 Apple 公证。不要关闭 Gatekeeper。

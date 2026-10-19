@@ -16,7 +16,7 @@ const itemSchema=z.object({
 const schema=z.object({memories:z.array(itemSchema).max(12)}).strict();
 export const traceId=(p:Pick<Prompt,'provider'|'conversationId'>)=>`${p.provider}:${p.conversationId}`;
 export const sameScope=(a?:Memory['scope'],b?:Memory['scope'])=>!!a&&!!b&&a.kind===b.kind&&a.label.normalize('NFKC').trim().toLowerCase()===b.label.normalize('NFKC').trim().toLowerCase();
-export const wirePrompt=(p:Prompt)=>({id:p.id,text:p.text,traceId:traceId(p),timestamp:p.timestamp});
+export const wirePrompt=(p:Prompt)=>({id:p.id,text:p.text,traceId:traceId(p),timestamp:p.timestamp,...(p.timeSource?{timeSource:p.timeSource}:{})});
 function terms(text:string){const tokens:string[]=text.toLowerCase().match(/[a-z0-9_-]{2,}/g)??[];for(const run of text.match(/[\u4e00-\u9fff]{2,}/g)??[])for(let i=0;i<run.length-1;i++)tokens.push(run.slice(i,i+2));return new Set(tokens)}
 export function relevantMemories(prompts:Prompt[],memories:Memory[]):AnalysisMemory[]{
  const words=terms(prompts.map(p=>p.text).join('\n'));const ids=new Set(prompts.map(p=>p.id));const traces=new Set(prompts.map(traceId));
@@ -42,7 +42,7 @@ export function validateMemories(data:unknown,prompts:Prompt[],existing:Analysis
   if(m.action==='add'){if(m.relatedMemoryId!==null)throw new Error('新增记忆不能替换旧记忆。')}
   else {const target=m.relatedMemoryId&&old.get(m.relatedMemoryId);if(!target||target.category!==m.category||!sameScope(target.scope,m.scope))throw new Error('记忆关联目标不存在或适用范围不同。')}
  }
- return parsed.memories.filter(m=>m.action!=='duplicate').map(m=>({...m,action:m.action as 'add'|'update'|'conflict',relatedMemoryId:m.relatedMemoryId??undefined,evidence:prompts.filter(p=>m.evidenceIds.includes(p.id)).map(({id,text,timestamp,provider,conversationId})=>({id,text,timestamp,provider,conversationId})),id:randomUUID(),status:'pending',createdAt:new Date().toISOString(),analysisVersion:ANALYSIS_VERSION,model}));
+ return parsed.memories.filter(m=>m.action!=='duplicate').map(m=>({...m,action:m.action as 'add'|'update'|'conflict',relatedMemoryId:m.relatedMemoryId??undefined,evidence:prompts.filter(p=>m.evidenceIds.includes(p.id)).map(({id,text,timestamp,provider,conversationId,source,timeSource})=>({id,text,timestamp,provider,conversationId,source,timeSource})),id:randomUUID(),status:'pending',createdAt:new Date().toISOString(),analysisVersion:ANALYSIS_VERSION,model}));
 }
 export async function analyze(input:AnalysisPreview,key:string):Promise<Memory[]>{
  const response=await fetch('https://openrouter.ai/api/v1/chat/completions',{

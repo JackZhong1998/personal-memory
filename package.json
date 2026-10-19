@@ -1,6 +1,6 @@
 {
   "name": "tracelet",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "A personal memory layer for your AI conversations",
   "main": "dist-electron/main.cjs",
@@ -9,12 +9,15 @@
   "scripts": {
     "dev": "npm run build:main && concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron . --dev\"",
     "build:main": "node scripts/build-main.mjs",
-    "build": "tsc --noEmit && vite build && npm run build:main",
+    "build": "tsc --noEmit && vite build && npm run build:main && npm run build:extension",
     "test": "tsx --test apps/desktop/test/*.test.ts",
     "smoke:electron": "node scripts/smoke-electron.mjs",
     "site:check": "node scripts/check-site.mjs",
     "dist:mac": "npm run build && electron-builder --mac --arm64 --x64 --publish never",
-    "eval:agent": "tsx scripts/evaluate-memory.ts"
+    "eval:agent": "tsx scripts/evaluate-memory.ts",
+    "check:workspace": "electron scripts/check-workspace.cjs",
+    "build:extension": "node scripts/build-extension.mjs",
+    "check:browser": "electron scripts/check-extension.cjs"
   },
   "dependencies": {
     "chokidar": "4.0.3",
@@ -76,6 +79,16 @@
           "path": "/Applications"
         }
       ]
-    }
+    },
+    "extraResources": [
+      {
+        "from": "dist-electron/browser-host.cjs",
+        "to": "bridge/browser-host.cjs"
+      },
+      {
+        "from": "browser-extension",
+        "to": "browser-extension"
+      }
+    ]
   }
 }

@@ -1,4 +1,4 @@
-import {copyFileSync,mkdirSync,readFileSync,statSync} from 'node:fs';
+import {copyFileSync,existsSync,mkdirSync,readFileSync,statSync} from 'node:fs';
 mkdirSync('publish',{recursive:true});
 for(const arch of ['arm64','x64']){
  const status=readFileSync(`artifacts/mac-${arch}/signing-status.txt`,'utf8').trim();
@@ -10,3 +10,5 @@ for(const arch of ['arm64','x64']){
  }
 }
 console.log('Selected one DMG and ZIP from each matching architecture artifact');
+
+const extension='artifacts/mac-arm64/Tracelet-browser-extension.zip';if(existsSync(extension))copyFileSync(extension,'publish/Tracelet-browser-extension.zip');

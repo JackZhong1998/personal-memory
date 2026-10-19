@@ -39,6 +39,8 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run smoke:electron
+      - run: npm run check:workspace
+      - run: npm run check:browser
       - name: Package (signed and notarized only when all Apple credentials are configured)
         env:
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
