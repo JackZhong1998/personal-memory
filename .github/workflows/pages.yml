@@ -34,8 +34,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/release-manifest.mjs
       - uses: actions/configure-pages@v5
-        with:
-          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
