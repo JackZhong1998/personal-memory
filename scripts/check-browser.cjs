@@ -9,7 +9,7 @@ app.whenReady().then(async()=>{
  const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png'};
  server=http.createServer((req,res)=>{const file=req.url==='/'?'index.html':req.url.slice(1);
   if(file==='release.json'){let data=mode==='off'?{available:false}:manifest(mode==='legacy'?'Tracelet':'Personal-Memory');if(mode==='invalid')data.assets.forEach(a=>a.url='https://example.invalid/'+a.name);res.setHeader('Content-Type','application/json');res.end(JSON.stringify(data));return}
-  if(!['index.html','privacy.html','style.css','app.js','icon.svg','workspace.png'].includes(file)){res.writeHead(404).end();return}res.setHeader('Content-Type',mime[require('node:path').extname(file)]);res.end(readFileSync(join(resolve('site'),file)));
+  if(!['index.html','privacy.html','style.css','app.js','icon.png','workspace.png'].includes(file)){res.writeHead(404).end();return}res.setHeader('Content-Type',mime[require('node:path').extname(file)]);res.end(readFileSync(join(resolve('site'),file)));
  });await new Promise(r=>server.listen(0,'127.0.0.1',r));const base=`http://127.0.0.1:${server.address().port}/`;
  mkdirSync('.local',{recursive:true});const page=new BrowserWindow({width:1440,height:1080,show:false,webPreferences:{offscreen:true,backgroundThrottling:false,sandbox:true,contextIsolation:true,nodeIntegration:false}});
  const errors=[];page.webContents.on('console-message',(_event,...args)=>{const details=args[0];if(details?.level==='error')errors.push(details.message)});

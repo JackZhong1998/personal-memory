@@ -22,6 +22,7 @@ const smoke=process.argv.includes('--smoke')&&!app.isPackaged;
 if(smoke)app.disableHardwareAcceleration();
 if(smoke&&process.env.TRACELET_SMOKE_DATA)app.setPath('userData',process.env.TRACELET_SMOKE_DATA);
 const dataDir=()=>app.getPath('userData');
+const brandPath=(file:string)=>app.isPackaged?join(process.resourcesPath,'brand',file):join(__dirname,'../assets/brand',file);
 const keyFile=()=>join(dataDir(),'openrouter.key');
 const changed=()=>window?.webContents.send('changed');
 const report=(e:unknown)=>{errors=[String(e instanceof Error?e.message:e),...errors].slice(0,5);changed()};
@@ -30,7 +31,7 @@ async function getKey(){try{return safeStorage.decryptString(await readFile(keyF
 async function keyPresent(){try{await stat(keyFile());return true}catch{return false}}
 async function publicSettings(){return {...settings,keyPresent:await keyPresent(),keyStorageAvailable:safeStorage.isEncryptionAvailable()}}
 function show(){if(window){window.show();window.focus();return}
- window=new BrowserWindow({width:1250,height:850,minWidth:960,minHeight:680,title:'Personal Memory · 你的个人记忆层',show:!smoke,backgroundColor:'#ffffff',webPreferences:{...(smoke?{offscreen:true,backgroundThrottling:false}:{}),preload:join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
+ window=new BrowserWindow({width:1250,height:850,minWidth:960,minHeight:680,title:'Personal Memory · 你的个人记忆层',icon:brandPath('icon.png'),show:!smoke,backgroundColor:'#ffffff',webPreferences:{...(smoke?{offscreen:true,backgroundThrottling:false}:{}),preload:join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
  window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
  window.webContents.on('will-navigate',e=>e.preventDefault());
  window.on('close',e=>{if(!quitting){e.preventDefault();window?.hide()}});
@@ -105,8 +106,8 @@ if(!app.requestSingleInstanceLock())app.quit();else{
  app.whenReady().then(async()=>{app.setAboutPanelOptions({applicationName:'Personal Memory',applicationVersion:app.getVersion()});await mkdir(dataDir(),{recursive:true,mode:0o700});
   try{const saved=JSON.parse(await readFile(join(dataDir(),'settings.json'),'utf8'));for(const key of ['watchCodex','watchClaude','watchBrowser','paused'] as const)if(typeof saved[key]==='boolean')settings[key]=saved[key];if(typeof saved.model==='string'&&saved.model.trim())settings.model=saved.model}catch(e:any){if(e.code!=='ENOENT')report(new Error('设置文件损坏，已使用默认设置。'))}
   store=await new Store(join(dataDir(),'tracelet.sqlite')).open();handlers();
-  const icon=nativeImage.createFromDataURL('data:image/svg+xml;base64,'+Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22"><path d="M4 5h8a5 5 0 0 1 0 10H7m0-5v10m-4-4 4 4 4-4" fill="none" stroke="black" stroke-width="2" stroke-linecap="round"/></svg>').toString('base64'));
-  if(!(smoke&&process.platform==='linux'&&!process.env.DISPLAY)){tray=new Tray(icon);tray.setTitle('⌁');tray.setToolTip('Personal Memory · 个人记忆');tray.setContextMenu(Menu.buildFromTemplate([{label:'打开 Personal Memory',click:show},{label:'退出',click:()=>app.quit()}]));tray.on('click',show)}
+  const icon=nativeImage.createFromPath(brandPath('trayTemplate.png'));if(icon.isEmpty())throw new Error('应用图标缺失');if(process.platform==='darwin'){icon.setTemplateImage(true);app.dock?.setIcon(brandPath('icon.png'))}
+  if(!(smoke&&process.platform==='linux'&&!process.env.DISPLAY)){tray=new Tray(icon);tray.setTitle('');tray.setToolTip('Personal Memory · 个人记忆');tray.setContextMenu(Menu.buildFromTemplate([{label:'打开 Personal Memory',click:show},{label:'退出',click:()=>app.quit()}]));tray.on('click',show)}
   Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'Personal Memory',submenu:[{role:'about',label:'关于 Personal Memory'},{role:'hide',label:'隐藏 Personal Memory'},{role:'quit',label:'退出 Personal Memory'}]},{role:'editMenu'},{role:'windowMenu'}]));
   show();await startWatch();
   if(smoke){await new Promise<void>(r=>{if(!window!.webContents.isLoading())r();else window!.webContents.once('did-finish-load',()=>r())});

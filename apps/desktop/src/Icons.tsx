@@ -1,7 +1,9 @@
+import brandIcon from '../../../assets/brand/icon-128.png';
 import type {ReactNode} from 'react';
 import type {Provider} from '../electron/types';
 import {platformLabel} from './provenance';
 export function Icon({name,size=18}:{name:string;size?:number}){
+ if(name==='logo')return <img src={brandIcon} width={size} height={size} alt="" aria-hidden="true"/>;
  const paths:Record<string,ReactNode>={
   workspace:<><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M10 4v16M14 9h3m-3 5h3"/></>,
   overview:<><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></>,
@@ -10,8 +12,7 @@ export function Icon({name,size=18}:{name:string;size?:number}){
   settings:<><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3" fill="currentColor" stroke="none"/><circle cx="15" cy="17" r="3" fill="currentColor" stroke="none"/></>,
   add:<path d="M12 5v14M5 12h14"/>,search:<><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></>,
   arrow:<path d="m9 5 7 7-7 7"/>,lock:<><rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 4v3"/></>,
-  source:<><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 9h10m-10 5h6"/></>,
-  logo:<><path d="m4 8 8-4 8 4-8 4-8-4Zm0 5 8 4 8-4M4 18l8 4 8-4"/></>
+  source:<><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 9h10m-10 5h6"/></>
  };
  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]??paths.source}</svg>
 }

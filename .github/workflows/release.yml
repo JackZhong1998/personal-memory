@@ -41,6 +41,8 @@ jobs:
       - run: npm run smoke:electron
       - run: npm run check:workspace
       - run: npm run check:browser
+      - name: Validate native macOS app icon
+        run: iconutil --convert iconset assets/brand/icon.icns --output "$RUNNER_TEMP/personal-memory.iconset"
       - name: Package (signed and notarized only when all Apple credentials are configured)
         env:
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
