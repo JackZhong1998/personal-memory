@@ -14,6 +14,9 @@ let window:BrowserWindow|null=null;let tray:Tray;let store:Store;let quitting=fa
 let settings:Omit<Settings,'keyPresent'|'keyStorageAvailable'>={watchCodex:false,watchClaude:false,watchBrowser:false,model:'deepseek/deepseek-v4-flash',paused:false};
 let browserWatcher:FSWatcher|undefined;
 let errors:string[]=[];let busy=false;let queue=Promise.resolve();
+// Keep the legacy OS identity for Keychain/safeStorage and existing user data.
+app.setName('Tracelet');
+app.setPath('userData',join(app.getPath('appData'),app.isPackaged?'Tracelet':'tracelet'));
 const dev=process.argv.includes('--dev')&&!app.isPackaged;
 const smoke=process.argv.includes('--smoke')&&!app.isPackaged;
 if(smoke)app.disableHardwareAcceleration();
@@ -27,7 +30,7 @@ async function getKey(){try{return safeStorage.decryptString(await readFile(keyF
 async function keyPresent(){try{await stat(keyFile());return true}catch{return false}}
 async function publicSettings(){return {...settings,keyPresent:await keyPresent(),keyStorageAvailable:safeStorage.isEncryptionAvailable()}}
 function show(){if(window){window.show();window.focus();return}
- window=new BrowserWindow({width:1250,height:850,minWidth:960,minHeight:680,title:'Tracelet · 你的个人记忆层',show:!smoke,backgroundColor:'#ffffff',webPreferences:{...(smoke?{offscreen:true,backgroundThrottling:false}:{}),preload:join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
+ window=new BrowserWindow({width:1250,height:850,minWidth:960,minHeight:680,title:'Personal Memory · 你的个人记忆层',show:!smoke,backgroundColor:'#ffffff',webPreferences:{...(smoke?{offscreen:true,backgroundThrottling:false}:{}),preload:join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
  window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
  window.webContents.on('will-navigate',e=>e.preventDefault());
  window.on('close',e=>{if(!quitting){e.preventDefault();window?.hide()}});
@@ -81,7 +84,7 @@ function handlers(){
   const key=await getKey();if(!key)throw new Error('请先在设置中保存 API Key');busy=true;try{const memories=await analyze(p,key);const existing=store.memories().filter(m=>m.status==='pending'||m.status==='accepted');const novel=memories.filter(m=>!existing.some(old=>old.claim.trim()===m.claim.trim()&&old.category===m.category&&sameScope(old.scope,m.scope)));await store.addMemories(novel);await store.markAnalyzed(p.prompts);changed();return novel.length}finally{busy=false}
  });
  register('review',async(id:unknown,status:unknown)=>{if(typeof id!=='string'||!['accepted','rejected'].includes(String(status)))throw new Error('审核参数无效');await store.review(id,status as 'accepted'|'rejected');changed()});
- register('export',async()=>{const file=await dialog.showSaveDialog({defaultPath:'tracelet-export.json',filters:[{name:'JSON',extensions:['json']}]});if(file.canceled||!file.filePath)return false;await writeFile(file.filePath,JSON.stringify({version:1,exportedAt:new Date().toISOString(),prompts:store.prompts(),memories:store.memories()},null,2),{mode:0o600});return true});
+ register('export',async()=>{const file=await dialog.showSaveDialog({defaultPath:'personal-memory-export.json',filters:[{name:'JSON',extensions:['json']}]});if(file.canceled||!file.filePath)return false;await writeFile(file.filePath,JSON.stringify({version:1,exportedAt:new Date().toISOString(),prompts:store.prompts(),memories:store.memories()},null,2),{mode:0o600});return true});
  register('erase',async()=>{if(busy)throw new Error('请等待分析结束后再清空数据');const answer=await dialog.showMessageBox({type:'warning',message:'删除所有本地提问与记忆？',detail:'采集将暂停。原始平台文件不会被删除；重新开启采集会再次导入。此操作无法撤销。',buttons:['取消','删除'],defaultId:0,cancelId:0});if(answer.response!==1)return false;settings.paused=true;await atomic(join(dataDir(),'settings.json'),JSON.stringify(settings));await startWatch();await queue;await store.erase();for(const file of await readdir(join(dataDir(),'browser-inbox')).catch(()=>[]))if(file.endsWith('.json')||file.endsWith('.tmp'))await unlink(join(dataDir(),'browser-inbox',file));changed();return true});
  register('open-extension',()=>shell.openPath(app.isPackaged?join(process.resourcesPath,'browser-extension'):join(__dirname,'../browser-extension')));
  register('pair-browser',async(id:unknown,browser:unknown)=>{
@@ -92,19 +95,19 @@ function handlers(){
   const launcher=join(dataDir(),'browser-host.sh');
   await atomic(launcher,'#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec '+quote(process.execPath)+' '+quote(host)+' --data-dir '+quote(dataDir())+'\n');await chmod(launcher,0o700);
   const folder=join(homedir(),'Library/Application Support',browser==='chrome'?'Google/Chrome':'Microsoft Edge','NativeMessagingHosts');await mkdir(folder,{recursive:true});
-  await atomic(join(folder,'app.tracelet.browser.json'),JSON.stringify({name:'app.tracelet.browser',description:'Tracelet local browser capture',path:launcher,type:'stdio',allowed_origins:[`chrome-extension://${id}/`]}));
+  await atomic(join(folder,'app.tracelet.browser.json'),JSON.stringify({name:'app.tracelet.browser',description:'Personal Memory local browser capture',path:launcher,type:'stdio',allowed_origins:[`chrome-extension://${id}/`]}));
   settings.watchBrowser=true;await atomic(join(dataDir(),'settings.json'),JSON.stringify(settings));await startWatch();changed();
  });
  register('open-data',()=>shell.openPath(dataDir()));
 }
 if(!app.requestSingleInstanceLock())app.quit();else{
  app.on('second-instance',show);
- app.whenReady().then(async()=>{await mkdir(dataDir(),{recursive:true,mode:0o700});
+ app.whenReady().then(async()=>{app.setAboutPanelOptions({applicationName:'Personal Memory',applicationVersion:app.getVersion()});await mkdir(dataDir(),{recursive:true,mode:0o700});
   try{const saved=JSON.parse(await readFile(join(dataDir(),'settings.json'),'utf8'));for(const key of ['watchCodex','watchClaude','watchBrowser','paused'] as const)if(typeof saved[key]==='boolean')settings[key]=saved[key];if(typeof saved.model==='string'&&saved.model.trim())settings.model=saved.model}catch(e:any){if(e.code!=='ENOENT')report(new Error('设置文件损坏，已使用默认设置。'))}
   store=await new Store(join(dataDir(),'tracelet.sqlite')).open();handlers();
   const icon=nativeImage.createFromDataURL('data:image/svg+xml;base64,'+Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22"><path d="M4 5h8a5 5 0 0 1 0 10H7m0-5v10m-4-4 4 4 4-4" fill="none" stroke="black" stroke-width="2" stroke-linecap="round"/></svg>').toString('base64'));
-  if(!(smoke&&process.platform==='linux'&&!process.env.DISPLAY)){tray=new Tray(icon);tray.setTitle('⌁');tray.setToolTip('Tracelet · 个人记忆');tray.setContextMenu(Menu.buildFromTemplate([{label:'打开 Tracelet',click:show},{label:'退出',click:()=>app.quit()}]));tray.on('click',show)}
-  Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'Tracelet',submenu:[{role:'about'},{role:'hide'},{role:'quit'}]},{role:'editMenu'},{role:'windowMenu'}]));
+  if(!(smoke&&process.platform==='linux'&&!process.env.DISPLAY)){tray=new Tray(icon);tray.setTitle('⌁');tray.setToolTip('Personal Memory · 个人记忆');tray.setContextMenu(Menu.buildFromTemplate([{label:'打开 Personal Memory',click:show},{label:'退出',click:()=>app.quit()}]));tray.on('click',show)}
+  Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'Personal Memory',submenu:[{role:'about',label:'关于 Personal Memory'},{role:'hide',label:'隐藏 Personal Memory'},{role:'quit',label:'退出 Personal Memory'}]},{role:'editMenu'},{role:'windowMenu'}]));
   show();await startWatch();
   if(smoke){await new Promise<void>(r=>{if(!window!.webContents.isLoading())r();else window!.webContents.once('did-finish-load',()=>r())});
    await window!.webContents.executeJavaScript(`window.tracelet.settings({watchCodex:true})`);
@@ -129,7 +132,7 @@ if(!app.requestSingleInstanceLock())app.quit();else{
    const browserPrompt=store.prompts().find(p=>p.provider==='grok');if(store.count()!==3||browserPrompt?.timeSource!=='captured'||browserPrompt?.source!=='https://grok.com/c/smoke')throw new Error('Smoke failed: native inbox watcher');
    console.log('TRACELET_SMOKE_OK: watcher, SQLite/WASM, split workspace, evidence navigation, human review, exact outgoing preview, compiled native host and browser inbox; no AI request sent');app.quit();
   }
- }).catch(e=>{if(smoke){console.error('::error::TRACELET_SMOKE_FAILED: '+String(e.message));app.exit(1)}else{dialog.showErrorBox('Tracelet 启动失败',String(e.message));app.quit()}});
+ }).catch(e=>{if(smoke){console.error('::error::TRACELET_SMOKE_FAILED: '+String(e.message));app.exit(1)}else{dialog.showErrorBox('Personal Memory 启动失败',String(e.message));app.quit()}});
  app.on('activate',()=>{if(store)show()});
  app.on('before-quit',()=>{quitting=true;void watcher?.close();void browserWatcher?.close()});
  app.on('window-all-closed',()=>{});

@@ -1,12 +1,12 @@
-# 浏览器采集 · 0.3.3 Beta
+# 浏览器采集 · 0.4.0 Beta
 
 支持 Chrome / Edge 扩展。不是浏览器插件商店发行版；目前以已解压扩展加载。Safari 暂未支持。
 
 ## 安装
 
-1. 安装并打开 Mac 版 Tracelet。在「连接与设置 → 浏览器扩展」打开扩展文件夹；或从同一 GitHub Release 下载 `Tracelet-browser-extension.zip` 并解压。
+1. 安装并打开 Mac 版 Personal Memory。在「连接与设置 → 浏览器扩展」打开扩展文件夹；或从同一 GitHub Release 下载 `Personal-Memory-browser-extension.zip` 并解压。
 2. 在 `chrome://extensions` 或 `edge://extensions` 开启开发者模式，加载已解压扩展。复制其 32 位 ID。
-3. 在 Tracelet 中选择浏览器并输入 ID，点击配对。应用会为当前 macOS 用户写入该浏览器的 Native Messaging Host 清单，仅允许此 ID。
+3. 在 Personal Memory 中选择浏览器并输入 ID，点击配对。应用会为当前 macOS 用户写入该浏览器的 Native Messaging Host 清单，仅允许此 ID。
 4. 打开一段有独立网址的 AI 对话，点击扩展的「预览用户消息」。逐条核对结果，确认均为已提交的用户提问后「授权并开启本站」。规则默认关闭；授权仅限该 HTTPS 来源。
 5. 新增/变化的消息进入扩展本地队列，经原生消息管道交给本机桌面端。桌面未启动也可先入待导入目录，下次启动入库。断线每分钟重试，亦可手动同步。应用的来源列表会出现对应平台。
 6. 选择对话 → 预览发送内容 → 确认 AI 分析 → 审核候选记忆。浏览器采集本身不调用 AI。

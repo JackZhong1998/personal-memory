@@ -47,7 +47,7 @@ export function validateMemories(data:unknown,prompts:Prompt[],existing:Analysis
 export async function analyze(input:AnalysisPreview,key:string):Promise<Memory[]>{
  const response=await fetch('https://openrouter.ai/api/v1/chat/completions',{
   method:'POST',signal:AbortSignal.timeout(120000),
-  headers:{'Authorization':`Bearer ${key}`,'Content-Type':'application/json','X-Title':'Tracelet'},
+  headers:{'Authorization':`Bearer ${key}`,'Content-Type':'application/json','X-Title':'Personal Memory'},
   body:JSON.stringify({model:input.model,temperature:0.1,max_tokens:6000,response_format:{type:'json_object'},messages:[
    {role:'system',content:SYSTEM},
    {role:'user',content:JSON.stringify({promptVersion:input.promptVersion,prompts:input.prompts.map(wirePrompt),existingMemories:input.existingMemories})}

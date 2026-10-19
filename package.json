@@ -1,10 +1,10 @@
 {
-  "name": "tracelet",
-  "version": "0.3.3",
+  "name": "personal-memory",
+  "version": "0.4.0",
   "private": true,
   "description": "A personal memory layer for your AI conversations",
   "main": "dist-electron/main.cjs",
-  "author": "Tracelet",
+  "author": "Personal Memory",
   "license": "MIT",
   "scripts": {
     "dev": "npm run build:main && concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron . --dev\"",
@@ -17,7 +17,8 @@
     "eval:agent": "tsx scripts/evaluate-memory.ts",
     "check:workspace": "electron scripts/check-workspace.cjs",
     "build:extension": "node scripts/build-extension.mjs",
-    "check:browser": "electron scripts/check-extension.cjs"
+    "check:browser": "electron scripts/check-extension.cjs",
+    "check:site-browser": "electron scripts/check-browser.cjs"
   },
   "dependencies": {
     "chokidar": "4.0.3",
@@ -43,7 +44,7 @@
   },
   "build": {
     "appId": "app.tracelet.desktop",
-    "productName": "Tracelet",
+    "productName": "Personal Memory",
     "directories": {
       "output": "release"
     },
@@ -64,9 +65,9 @@
       "entitlementsInherit": "apps/desktop/entitlements.mac.plist",
       "minimumSystemVersion": "13.0.0"
     },
-    "artifactName": "Tracelet-mac-${arch}.${ext}",
+    "artifactName": "Personal-Memory-mac-${arch}.${ext}",
     "dmg": {
-      "title": "Tracelet",
+      "title": "Personal Memory",
       "contents": [
         {
           "x": 140,

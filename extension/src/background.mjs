@@ -10,7 +10,7 @@ chrome.runtime.onInstalled.addListener(()=>{void register().catch(()=>{});void c
 chrome.alarms.onAlarm.addListener(alarm=>{if(alarm.name==='retry')void lock(async()=>{try{const {outbox={}}=await chrome.storage.local.get('outbox');if(Object.keys(outbox).length)await sync()}catch(e){await chrome.storage.local.set({lastError:e.message})}})});
 async function sync(){let {outbox={}}=await chrome.storage.local.get('outbox');let sent=0;
  for(const packet of packets(outbox)){
-  let response;try{response=await chrome.runtime.sendNativeMessage('app.tracelet.browser',packet)}catch{throw new Error('桌面应用未连接；请在 Tracelet 设置中配对扩展 ID。数据已留在本地。')}
+  let response;try{response=await chrome.runtime.sendNativeMessage('app.tracelet.browser',packet)}catch{throw new Error('桌面应用未连接；请在 Personal Memory 设置中配对扩展 ID。数据已留在本地。')}
   if(!response?.ok)throw new Error(response?.error||'桌面接收失败');
   for(const message of packet.messages){delete outbox[packet.conversationId+':'+message.id];sent++}
   await chrome.storage.local.set({outbox});

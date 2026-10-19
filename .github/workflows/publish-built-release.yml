@@ -44,7 +44,9 @@ jobs:
           set -euo pipefail
           node scripts/prepare-release.mjs
           for arch in arm64 x64; do
-            unzip -tq "publish/Tracelet-mac-$arch.zip"
+            zip_path="publish/Personal-Memory-mac-$arch.zip"
+            [[ -f "$zip_path" ]] || zip_path="publish/Tracelet-mac-$arch.zip"
+            unzip -tq "$zip_path"
           done
           cd publish
           sha256sum *.dmg *.zip > SHA256SUMS.txt
@@ -66,7 +68,7 @@ jobs:
             exit 1
           fi
           # The tag already exists and was verified above. Do not request creation of a tag at an older workflow commit.
-          if ! gh release create "$tag" publish/* --verify-tag --title "Tracelet $tag" --notes-file release-notes.md > /tmp/publish.log 2>&1; then
+          if ! gh release create "$tag" publish/* --verify-tag --title "Personal Memory $tag" --notes-file release-notes.md > /tmp/publish.log 2>&1; then
             while IFS= read -r line; do echo "::error::$line"; done < /tmp/publish.log
             exit 1
           fi

@@ -20,10 +20,10 @@ git push origin v0.1.0
 产物：
 
 ```text
-Tracelet-mac-arm64.dmg
-Tracelet-mac-arm64.zip
-Tracelet-mac-x64.dmg
-Tracelet-mac-x64.zip
+Personal-Memory-mac-arm64.dmg
+Personal-Memory-mac-arm64.zip
+Personal-Memory-mac-x64.dmg
+Personal-Memory-mac-x64.zip
 SHA256SUMS.txt
 ```
 
@@ -49,7 +49,7 @@ Release 完成触发 Pages 工作流，查询 GitHub 最新 Release 的实际文
 
 ## 验证下载
 
-从 Release 下载对应 DMG 与 `SHA256SUMS.txt`。运行 `shasum -a 256 Tracelet-mac-arm64.dmg`（Intel 替换文件名），与清单逐字比较。安装后拖入 Applications，打开设置连接来源；确认同步自己的实际 Codex/Claude Code 文件，再配置新 OpenRouter Key，先检查一小批提问后发送分析。
+从 Release 下载对应 DMG 与 `SHA256SUMS.txt`。运行 `shasum -a 256 Personal-Memory-mac-arm64.dmg`（Intel 替换文件名），与清单逐字比较。安装后拖入 Applications，打开设置连接来源；确认同步自己的实际 Codex/Claude Code 文件，再配置新 OpenRouter Key，先检查一小批提问后发送分析。
 
 自动测试覆盖结构化合成数据、真实 Electron 文件监听 / preload / SQLite / React 启动；不等于对所有平台版本及真实个人日志都完成验证。发布前请至少在一台实际 Mac 上完成钥匙串、菜单栏、退出重启和一次付费分析的人工验收。
 
