@@ -75,4 +75,4 @@ MIT。用户数据、第三方平台服务和模型使用仍受各自政策约�
 
 ## 品牌升级兼容性
 
-0.4.0 起产品名为 Personal Memory，Mac 应用为 `Personal Memory.app`，下载包使用 `Personal-Memory-*`。原有数据库、Keychain 服务、浏览器 Host 名称及导出协议标识保持兼容，因此本机目录仍为 `~/Library/Application Support/Tracelet/`，旧对话、记忆和 Key 无需迁移。升级前如有扩展待同步内容，先完成同步或导出扩展 JSON 备份。升级后请使用新应用替换旧版，并在扩展管理页重新加载扩展；若扩展 ID 改变需重新配对。
+0.4.0 起产品名为 Personal Memory，Mac 应用为 `Personal Memory.app`，下载包使用 `Personal-Memory-*`。原有数据库、Keychain 服务、浏览器 Host 名称及导出协议标识保持兼容，因此本机目录仍为 `~/Library/Application Support/Tracelet/`，旧对话、记忆和 Key 无需迁移。升级前如有扩展待同步内容，先完成同步或导出扩展 JSON 备份。升级时先退出旧版，再打开 Personal Memory；确认原有数据可见后移除旧应用。并在扩展管理页重新加载扩展；若扩展 ID 改变需重新配对。
