@@ -1,0 +1,24 @@
+name: Diagnose Mac signature checks
+on:
+  push:
+    branches: [diagnose-mac-signatures]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report current Mac job steps
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for run in 39784277257 39786371987 39786370882; do
+            gh api "repos/JackZhong1998/personal-memory/actions/runs/$run/jobs" --paginate --jq '.jobs[] | {name,status,conclusion,started_at,steps:[.steps[] | select(.status != "pending") | {name,status,conclusion}]} | @json' | while IFS= read -r payload; do
+              printf '::notice::Run %s: %s\n' "$run" "$payload"
+            done
+          done
