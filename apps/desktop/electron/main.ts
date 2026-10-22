@@ -1,11 +1,11 @@
 import { app, BrowserWindow, ipcMain, dialog, safeStorage, Tray, Menu, nativeImage, shell, systemPreferences } from 'electron';
 import { readFile, writeFile, mkdir, rename, unlink, stat, readdir, chmod } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { join, resolve, basename, sep } from 'node:path';
 import {spawn,execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {DesktopReview,desktopAppSchema,desktopReadSchema} from './desktop-capture';
 import {z} from 'zod';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { watch, type FSWatcher } from 'chokidar';
 import {browserPrompts,frame} from './browser-capture';
 import { Store } from './store';
@@ -22,7 +22,9 @@ app.setName('Tracelet');
 app.setPath('userData',join(app.getPath('appData'),app.isPackaged?'Tracelet':'tracelet'));
 const dev=process.argv.includes('--dev')&&!app.isPackaged;
 const smoke=process.argv.includes('--smoke')&&!app.isPackaged;
-if(smoke)app.disableHardwareAcceleration();
+const packageCheck=app.isPackaged&&process.argv.includes('--package-check');
+if(packageCheck){const target=process.env.PERSONAL_MEMORY_PACKAGE_CHECK_DATA;if(!target||!resolve(target).startsWith(resolve(tmpdir())+sep)||!basename(target).startsWith('personal-memory-package-check-'))throw new Error('Package check requires an isolated temporary data directory');app.setPath('userData',target)}
+if(smoke||packageCheck)app.disableHardwareAcceleration();
 if(smoke&&process.env.TRACELET_SMOKE_DATA)app.setPath('userData',process.env.TRACELET_SMOKE_DATA);
 const dataDir=()=>app.getPath('userData');
 const brandPath=(file:string)=>app.isPackaged?join(process.resourcesPath,'brand',file):join(__dirname,'../assets/brand',file);
@@ -40,7 +42,7 @@ async function getKey(){try{return safeStorage.decryptString(await readFile(keyF
 async function keyPresent(){try{await stat(keyFile());return true}catch{return false}}
 async function publicSettings(){return {...settings,keyPresent:await keyPresent(),keyStorageAvailable:safeStorage.isEncryptionAvailable()}}
 function show(){if(window){window.show();window.focus();return}
- window=new BrowserWindow({width:1250,height:850,minWidth:960,minHeight:680,title:'Personal Memory · 你的个人记忆层',icon:brandPath('icon.png'),show:!smoke,backgroundColor:'#ffffff',webPreferences:{...(smoke?{offscreen:true,backgroundThrottling:false}:{}),preload:join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
+ window=new BrowserWindow({width:1250,height:850,minWidth:960,minHeight:680,title:'Personal Memory · 你的个人记忆层',icon:brandPath('icon.png'),show:!(smoke||packageCheck),backgroundColor:'#ffffff',webPreferences:{...((smoke||packageCheck)?{offscreen:true,backgroundThrottling:false}:{}),preload:join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
  window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
  window.webContents.on('will-navigate',e=>e.preventDefault());
  window.on('close',e=>{if(!quitting){e.preventDefault();window?.hide()}});
@@ -121,9 +123,16 @@ if(!app.requestSingleInstanceLock())app.quit();else{
   try{const saved=JSON.parse(await readFile(join(dataDir(),'settings.json'),'utf8'));for(const key of ['watchCodex','watchClaude','watchBrowser','paused'] as const)if(typeof saved[key]==='boolean')settings[key]=saved[key];if(typeof saved.model==='string'&&saved.model.trim())settings.model=saved.model}catch(e:any){if(e.code!=='ENOENT')report(new Error('设置文件损坏，已使用默认设置。'))}
   store=await new Store(join(dataDir(),'tracelet.sqlite')).open();handlers();
   const icon=nativeImage.createFromPath(brandPath('trayTemplate.png'));if(icon.isEmpty())throw new Error('应用图标缺失');if(process.platform==='darwin'){icon.setTemplateImage(true);app.dock?.setIcon(brandPath('icon.png'))}
-  if(!(smoke&&process.platform==='linux'&&!process.env.DISPLAY)){tray=new Tray(icon);tray.setTitle('');tray.setToolTip('Personal Memory · 个人记忆');tray.setContextMenu(Menu.buildFromTemplate([{label:'打开 Personal Memory',click:show},{label:'退出',click:()=>app.quit()}]));tray.on('click',show)}
+  if(!packageCheck&&!(smoke&&process.platform==='linux'&&!process.env.DISPLAY)){tray=new Tray(icon);tray.setTitle('');tray.setToolTip('Personal Memory · 个人记忆');tray.setContextMenu(Menu.buildFromTemplate([{label:'打开 Personal Memory',click:show},{label:'退出',click:()=>app.quit()}]));tray.on('click',show)}
   Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'Personal Memory',submenu:[{role:'about',label:'关于 Personal Memory'},{role:'hide',label:'隐藏 Personal Memory'},{role:'quit',label:'退出 Personal Memory'}]},{role:'editMenu'},{role:'windowMenu'}]));
+  if(packageCheck){settings.watchCodex=false;settings.watchClaude=false;settings.watchBrowser=false;settings.paused=true}
   show();await startWatch();
+  if(packageCheck){
+   const deadline=Date.now()+20000;let ready=false;while(Date.now()<deadline){if(!window!.webContents.isLoading()){ready=await window!.webContents.executeJavaScript(`!!document.querySelector('.memory-workspace')&&!!document.querySelector('.sidebar')`);if(ready)break}await new Promise(r=>setTimeout(r,100))}
+   if(!ready||store.count()!==0)throw new Error('Packaged renderer or empty SQLite failed');
+   const apps=z.array(desktopAppSchema).parse(await nativeCapture(['--apps']));
+   console.log('PACKAGE_CHECK_OK v'+app.getVersion()+': packaged renderer, SQLite/WASM, native helper ('+apps.length+' running apps); no user data or AI request');app.quit();return;
+  }
   if(smoke){await new Promise<void>(r=>{if(!window!.webContents.isLoading())r();else window!.webContents.once('did-finish-load',()=>r())});
    await window!.webContents.executeJavaScript(`window.tracelet.settings({watchCodex:true})`);
    const deadline=Date.now()+15000;let count=0;while(Date.now()<deadline){const s=await window!.webContents.executeJavaScript('window.tracelet.snapshot()');count=s.promptCount;if(count===2)break;await new Promise(r=>setTimeout(r,200))}
@@ -151,7 +160,7 @@ if(!app.requestSingleInstanceLock())app.quit();else{
    const browserPrompt=store.prompts().find(p=>p.provider==='grok');if(store.count()!==3||browserPrompt?.timeSource!=='captured'||browserPrompt?.source!=='https://grok.com/c/smoke')throw new Error('Smoke failed: native inbox watcher');
    console.log('TRACELET_SMOKE_OK: watcher, SQLite/WASM, split workspace, evidence navigation, human review, exact outgoing preview, compiled native host and browser inbox; no AI request sent');app.quit();
   }
- }).catch(e=>{if(smoke){console.error('::error::TRACELET_SMOKE_FAILED: '+String(e.message));app.exit(1)}else{dialog.showErrorBox('Personal Memory 启动失败',String(e.message));app.quit()}});
+ }).catch(e=>{if(smoke||packageCheck){console.error('::error::TRACELET_SMOKE_FAILED: '+String(e.message));app.exit(1)}else{dialog.showErrorBox('Personal Memory 启动失败',String(e.message));app.quit()}});
  app.on('activate',()=>{if(store)show()});
  app.on('before-quit',()=>{quitting=true;void watcher?.close();void browserWatcher?.close()});
  app.on('window-all-closed',()=>{});

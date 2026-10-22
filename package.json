@@ -1,6 +1,6 @@
 {
   "name": "personal-memory",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "private": true,
   "description": "A personal memory layer for your AI conversations",
   "main": "dist-electron/main.cjs",
@@ -21,7 +21,8 @@
     "check:site-browser": "electron scripts/check-browser.cjs",
     "build:brand": "electron scripts/build-brand.cjs",
     "build:native": "node scripts/build-native.mjs",
-    "check:desktop": "electron scripts/check-desktop-capture.cjs"
+    "check:desktop": "electron scripts/check-desktop-capture.cjs",
+    "check:mac-package": "node scripts/verify-mac-package.mjs"
   },
   "dependencies": {
     "chokidar": "4.0.3",
@@ -67,7 +68,10 @@
       "entitlements": "apps/desktop/entitlements.mac.plist",
       "entitlementsInherit": "apps/desktop/entitlements.mac.plist",
       "minimumSystemVersion": "13.0.0",
-      "icon": "assets/brand/icon.icns"
+      "icon": "assets/brand/icon.icns",
+      "binaries": [
+        "Contents/Resources/native/window-capture"
+      ]
     },
     "artifactName": "Personal-Memory-mac-${arch}.${ext}",
     "dmg": {

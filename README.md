@@ -65,7 +65,7 @@ Linux 图形冒烟测试：`xvfb-run -a npm run smoke:electron`。Mac：`npm run
 - `Release macOS`：在 Apple Silicon / Intel Mac runner 构建 DMG、ZIP 与 SHA-256 校验文件，发布 GitHub Release，附浏览器扩展 ZIP；也可手动运行。
 - `Deploy website`：部署 GitHub Pages，并从最新真实 Release 生成下载清单。
 
-本机 Mac 打包：`npm run dist:mac`。输出到 `release/`。未配置 Apple 证书时是未签名/未公证的测试包。正式分发应配置 Developer ID 签名与 Apple 公证。不要关闭 Gatekeeper。
+本机 Mac 打包：`npm run dist:mac`。输出到 `release/`。未配置 Apple 证书时使用 ad-hoc 完整性签名，仍无 Developer ID 身份且未公证；macOS 可能拦截。正式分发应配置 Developer ID 签名与 Apple 公证。不要关闭 Gatekeeper。
 
 ## 数据与架构
 

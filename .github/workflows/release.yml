@@ -44,6 +44,8 @@ jobs:
       - run: npm run check:browser
       - name: Validate native macOS app icon
         run: iconutil --convert iconset assets/brand/icon.icns --output "$RUNNER_TEMP/personal-memory.iconset"
+      - name: Diagnose previous release integrity without executing it
+        run: node scripts/inspect-previous-mac.mjs "${{ matrix.arch }}"
       - name: Package (signed and notarized only when all Apple credentials are configured)
         env:
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
@@ -64,9 +66,11 @@ jobs:
           else
             export CSC_IDENTITY_AUTO_DISCOVERY=false
             unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
-            npx electron-builder --mac --"$BUILD_ARCH" --publish never -c.mac.notarize=false
-            echo unsigned > release/signing-status.txt
+            npx electron-builder --mac --"$BUILD_ARCH" --publish never -c.mac.identity=- -c.mac.hardenedRuntime=false -c.mac.notarize=false
+            echo adhoc > release/signing-status.txt
           fi
+      - name: Verify signatures and launch actual ZIP and DMG app
+        run: npm run check:mac-package -- "${{ matrix.arch }}"
       - uses: actions/upload-artifact@v4
         with:
           name: mac-${{ matrix.arch }}

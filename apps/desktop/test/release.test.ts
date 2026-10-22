@@ -4,9 +4,9 @@ import {mkdtemp,mkdir,writeFile,readFile,readdir,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
-for(const prefix of ['Personal-Memory','Tracelet'])test(`Release staging preserves ${prefix} asset names and matching architectures`,async()=>{
+for(const [prefix,status] of [['Personal-Memory','adhoc'],['Tracelet','unsigned']])test(`Release staging preserves ${prefix} asset names, ${status} metadata and matching architectures`,async()=>{
  const root=await mkdtemp(join(tmpdir(),'tracelet-release-'));const script=resolve('scripts/prepare-release.mjs');
- try{for(const runner of ['arm64','x64']){const dir=join(root,'artifacts',`mac-${runner}`);await mkdir(dir,{recursive:true});await writeFile(join(dir,'signing-status.txt'),'unsigned\n');
+ try{for(const runner of ['arm64','x64']){const dir=join(root,'artifacts',`mac-${runner}`);await mkdir(dir,{recursive:true});await writeFile(join(dir,'signing-status.txt'),status+'\n');
   for(const arch of ['arm64','x64'])for(const ext of ['dmg','zip'])await writeFile(join(dir,`${prefix}-mac-${arch}.${ext}`),`${runner}:${arch}`);
  }
  const result=spawnSync(process.execPath,[script],{cwd:root,encoding:'utf8'});assert.equal(result.status,0,result.stderr);

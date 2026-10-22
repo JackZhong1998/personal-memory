@@ -9,6 +9,6 @@ fetch('./release.json',{cache:'no-cache'}).then(r=>{if(!r.ok)throw new Error('ma
  const prefix='https://github.com/JackZhong1998/personal-memory/releases/download/'+release.tag+'/';
  for(const button of buttons){const arch=button.dataset.arch;const asset=release.assets?.find(a=>[`Personal-Memory-mac-${arch}.dmg`,`Tracelet-mac-${arch}.dmg`].includes(a.name)&&a.url===prefix+a.name);if(!asset)continue;button.href=asset.url;button.removeAttribute('aria-disabled')}
  const ext=release.assets?.find(a=>['Personal-Memory-browser-extension.zip','Tracelet-browser-extension.zip'].includes(a.name)&&a.url===prefix+a.name);if(ext){extension.href=ext.url;extension.removeAttribute('aria-disabled')}
- status.textContent=`${release.tag} · ${release.signed?'已签名并公证':'未签名 / 未公证测试包，请先阅读发布说明'} · macOS 13+`;
+ status.textContent=`${release.tag} · ${release.signed?'已签名并公证':'未 Developer ID 签名 / 未公证测试包，请先阅读发布说明'} · macOS 13+`;
 }).catch(()=>{status.textContent='暂时无法确认安装包状态，请前往 GitHub Releases 查看。'});
 buttons.forEach(button=>button.addEventListener('click',event=>{if(button.getAttribute('aria-disabled')==='true'){event.preventDefault();status.textContent='目前尚无已验证的对应安装包。请点击下方「发布说明与校验值」查看进度。';status.scrollIntoView({block:'nearest',behavior:'smooth'})}}));

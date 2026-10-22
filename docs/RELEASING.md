@@ -45,7 +45,7 @@ Release 完成触发 Pages 工作流，查询 GitHub 最新 Release 的实际文
 | `APPLE_APP_SPECIFIC_PASSWORD` | 公证专用密码 |
 | `APPLE_TEAM_ID` | Apple Developer Team |
 
-工作流在证书与公证身份齐全时强制公证，并进行 codesign 和 Gatekeeper 检查；失败不会发布。未配齐时显式生成未签名测试包，发布说明不冒充已认证。OpenRouter Key 不用于构建，**不要**放在这些 secrets 或安装包中。
+工作流在证书与公证身份齐全时强制公证，并进行 codesign 和 Gatekeeper 检查；失败不会发布。未配齐时使用 ad-hoc 完整性签名（不是 Developer ID 身份），关闭仅适用于可信身份的 hardened runtime，且仍不公证。native helper 作为额外二进制显式签名。发布前分别解压 ZIP、只读挂载 DMG，执行 codesign --verify --deep --strict，并实际启动其中的 App，在独立临时数据目录验证 React、SQLite/WASM 和内置 helper；不会删除 quarantine 或绕过 Gatekeeper。发布说明明确标注 ad-hoc，官网仍显示未 Developer ID 签名 / 未公证。OpenRouter Key 不用于构建，**不要**放在这些 secrets 或安装包中。
 
 ## 验证下载
 
@@ -60,3 +60,9 @@ Release 完成触发 Pages 工作流，查询 GitHub 最新 Release 的实际文
 - Pages 403 / 404：检查 Pages Source、仓库可见性、套餐与组织政策。
 - Actions 排队或 Mac runner 超额：检查账户 macOS runner 配额；Linux 不能替代 DMG 打包与 Mac 原生检查。
 - 不使用 `xattr -cr` 或全局关闭 Gatekeeper 作为默认安装流程。测试包请先审查 Release 说明及校验值，按 Apple 官方隐私与安全性流程操作。
+
+### macOS 提示“已损坏，无法打开”
+
+截图不能单独区分文件损坏、签名无效与 Gatekeeper 阻拦。先取消，确认下载来自本仓库官网且 SHA-256 与对应 Release 清单一致。v0.5.2 起增加封装后完整性签名与 ZIP/DMG 实际启动验证；这仍不等于通过 Apple 公证，也不能保证在带 quarantine 的用户电脑上免拦截。
+
+下载修正版并拖入 Applications 替换旧 App，不删除用户数据目录。若系统提供“系统设置 → 隐私与安全性 → 仍要打开”，在确认来源后可按系统流程批准。若没有该选项或仍显示损坏，应保留错误信息，检查 `codesign --verify --deep --strict --verbose=2 "/Applications/Personal Memory.app"` 的输出与包校验值，不能据此要求用户关闭 Gatekeeper。面向普通用户消除该步骤需要仓库管理员在上面的 Secrets 中配置正式 Developer ID 证书与公证凭据。
