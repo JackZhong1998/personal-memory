@@ -66,3 +66,5 @@ Release 完成触发 Pages 工作流，查询 GitHub 最新 Release 的实际文
 截图不能单独区分文件损坏、签名无效与 Gatekeeper 阻拦。先取消，确认下载来自本仓库官网且 SHA-256 与对应 Release 清单一致。v0.5.3 起增加封装后完整性签名与 ZIP/DMG 实际启动验证；这仍不等于通过 Apple 公证，也不能保证在带 quarantine 的用户电脑上免拦截。
 
 下载修正版并拖入 Applications 替换旧 App，不删除用户数据目录。若系统提供“系统设置 → 隐私与安全性 → 仍要打开”，在确认来源后可按系统流程批准。若没有该选项或仍显示损坏，应保留错误信息，检查 `codesign --verify --deep --strict --verbose=2 "/Applications/Personal Memory.app"` 的输出与包校验值，不能据此要求用户关闭 Gatekeeper。面向普通用户消除该步骤需要仓库管理员在上面的 Secrets 中配置正式 Developer ID 证书与公证凭据。
+
+Mac CI 对 v0.5.1 的真实包确认：arm64 为 `code has no resources but signature indicates they must be present`，x64 为 `code object is not signed at all`。v0.5.3 的两个架构均通过 ZIP 解压、DMG 只读挂载后的完整签名验证与启动检查。测试模式使用独立临时数据目录并跳过钥匙串访问，避免自动化等待系统授权；正常使用时的 Keychain 功能仍需用户批准。

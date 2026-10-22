@@ -9,19 +9,7 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    permissions:
-      contents: read
-      actions: write
     steps:
-      - name: Cancel superseded v0.5.2 investigation
-        if: github.ref == 'refs/tags/v0.5.3'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          state=$(gh run view 39784277257 --repo JackZhong1998/personal-memory --json status --jq .status)
-          if [ "$state" != completed ]; then
-            gh run cancel 39784277257 --repo JackZhong1998/personal-memory
-          fi
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -58,8 +46,6 @@ jobs:
       - run: npm run check:browser
       - name: Validate native macOS app icon
         run: iconutil --convert iconset assets/brand/icon.icns --output "$RUNNER_TEMP/personal-memory.iconset"
-      - name: Diagnose previous release integrity without executing it
-        run: node scripts/inspect-previous-mac.mjs "${{ matrix.arch }}"
       - name: Package (signed and notarized only when all Apple credentials are configured)
         env:
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
