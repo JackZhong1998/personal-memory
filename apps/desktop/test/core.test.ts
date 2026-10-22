@@ -35,7 +35,7 @@ test('ChatGPT export supports mapping graph and user-only content',()=>{
 });
 test('Claude and Grok JSON adapters accept supported formats',()=>{
  assert.equal(parseExport(JSON.stringify([{uuid:'c',chat_messages:[{uuid:'m',sender:'human',text:'hi'}]}]),'c.json')[0].provider,'claude');
- assert.equal(parseExport(JSON.stringify({id:'g',messages:[{id:'m',role:'user',content:'hi'},{role:'assistant',content:'answer'}]}),'g.json').length,1);
+ assert.equal(parseExport(JSON.stringify({provider:'grok',id:'g',messages:[{id:'m',role:'user',content:'hi'},{role:'assistant',content:'answer'}]}),'g.json').length,1);
  assert.throws(()=>parseExport('{}','x'),/不支持/);
  assert.throws(()=>parseExport('{','x'));
 });

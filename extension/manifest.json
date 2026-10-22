@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Personal Memory · 浏览器提问采集",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "description": "采集已授权 AI 网页中已发送的用户提问，同步到本机 Personal Memory。",
   "permissions": [
     "storage",

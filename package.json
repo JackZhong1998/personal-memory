@@ -1,6 +1,6 @@
 {
   "name": "personal-memory",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "private": true,
   "description": "A personal memory layer for your AI conversations",
   "main": "dist-electron/main.cjs",
@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "npm run build:main && concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron . --dev\"",
     "build:main": "node scripts/build-main.mjs",
-    "build": "tsc --noEmit && vite build && npm run build:main && npm run build:extension",
+    "build": "tsc --noEmit && vite build && npm run build:main && npm run build:extension && npm run build:native",
     "test": "tsx --test apps/desktop/test/*.test.ts",
     "smoke:electron": "node scripts/smoke-electron.mjs",
     "site:check": "node scripts/check-site.mjs",
@@ -19,7 +19,9 @@
     "build:extension": "node scripts/build-extension.mjs",
     "check:browser": "electron scripts/check-extension.cjs",
     "check:site-browser": "electron scripts/check-browser.cjs",
-    "build:brand": "electron scripts/build-brand.cjs"
+    "build:brand": "electron scripts/build-brand.cjs",
+    "build:native": "node scripts/build-native.mjs",
+    "check:desktop": "electron scripts/check-desktop-capture.cjs"
   },
   "dependencies": {
     "chokidar": "4.0.3",
@@ -99,6 +101,10 @@
           "icon.png",
           "trayTemplate*.png"
         ]
+      },
+      {
+        "from": "dist-native/window-capture",
+        "to": "native/window-capture"
       }
     ]
   }

@@ -1,7 +1,10 @@
-import { app, BrowserWindow, ipcMain, dialog, safeStorage, Tray, Menu, nativeImage, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, safeStorage, Tray, Menu, nativeImage, shell, systemPreferences } from 'electron';
 import { readFile, writeFile, mkdir, rename, unlink, stat, readdir, chmod } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import {spawn} from 'node:child_process';
+import {spawn,execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+import {DesktopReview,desktopAppSchema,desktopReadSchema} from './desktop-capture';
+import {z} from 'zod';
 import { homedir } from 'node:os';
 import { watch, type FSWatcher } from 'chokidar';
 import {browserPrompts,frame} from './browser-capture';
@@ -24,7 +27,13 @@ if(smoke&&process.env.TRACELET_SMOKE_DATA)app.setPath('userData',process.env.TRA
 const dataDir=()=>app.getPath('userData');
 const brandPath=(file:string)=>app.isPackaged?join(process.resourcesPath,'brand',file):join(__dirname,'../assets/brand',file);
 const keyFile=()=>join(dataDir(),'openrouter.key');
+const desktopReview=new DesktopReview();
 const changed=()=>window?.webContents.send('changed');
+async function nativeCapture(args:string[]){
+ if(process.platform!=='darwin')throw new Error('窗口采集仅支持 macOS；其他系统可导入对话文件。');
+ const binary=app.isPackaged?join(process.resourcesPath,'native/window-capture'):join(__dirname,'../dist-native/window-capture');
+ try{const {stdout}=await promisify(execFile)(binary,args,{timeout:15000,maxBuffer:2*1024*1024});return JSON.parse(stdout)}catch(e:any){if(e.code==='ENOENT')throw new Error('缺少 Mac 窗口采集组件，请安装完整安装包或运行 npm run build:native。');let detail='';try{const result=JSON.parse(e.stdout);if(typeof result.error==='string')detail=result.error.slice(0,200)}catch{}throw new Error(detail||'无法读取窗口，请检查辅助功能授权并在目标应用打开对话。')}
+}
 const report=(e:unknown)=>{errors=[String(e instanceof Error?e.message:e),...errors].slice(0,5);changed()};
 async function atomic(file:string,data:string|Buffer){await writeFile(file+'.tmp',data,{mode:0o600});await rename(file+'.tmp',file)}
 async function getKey(){try{return safeStorage.decryptString(await readFile(keyFile()))}catch(e:any){if(e.code==='ENOENT')return '';throw new Error('无法解锁 API Key。请重新保存 Key。')}}
@@ -65,10 +74,15 @@ async function startWatch(){await browserWatcher?.close();browserWatcher=undefin
 }
 function selected(ids:unknown){if(!Array.isArray(ids)||ids.length>1000||ids.some(i=>typeof i!=='string'))throw new Error('对话选择无效');return store.prompts().filter(p=>ids.includes(`${p.provider}:${p.conversationId}`))}
 function handlers(){
+ register('desktop-apps',async()=>z.array(desktopAppSchema).parse(await nativeCapture(['--apps'])));
+ register('desktop-permission',()=>{if(process.platform!=='darwin')throw new Error('窗口采集仅支持 macOS');return systemPreferences.isTrustedAccessibilityClient(true)});
+ register('desktop-preview',async(pid:unknown)=>{desktopReview.clear();if(settings.paused)throw new Error('采集已暂停，请先恢复');if(typeof pid!=='number'||!Number.isInteger(pid)||pid<=0)throw new Error('请选择正在运行的应用');const raw=desktopReadSchema.parse(await nativeCapture(['--read',String(pid)]));if(settings.paused)throw new Error('采集已暂停');if(raw.app.pid!==pid)throw new Error('应用已变化，请刷新列表');return desktopReview.stage(raw)});
+ register('desktop-commit',async(token:unknown,ids:unknown,provider:unknown,conversation:unknown)=>{if(settings.paused)throw new Error('采集已暂停');const rows=desktopReview.confirm(token,ids,provider,conversation);const added=await store.upsert(rows);desktopReview.clear();changed();return added});
  register('snapshot',async()=>({traces:store.traces(),memories:store.memories(),settings:await publicSettings(),errors,promptCount:store.count()}));
  register('prompts',(id:unknown)=>{if(typeof id!=='string')throw new Error('对话 ID 无效');return store.prompts(id)});
  register('settings',async(value:unknown)=>{if(!value||typeof value!=='object')throw new Error('设置无效');const v=value as Record<string,unknown>;
   for(const key of ['watchCodex','watchClaude','watchBrowser','paused'] as const){if(key in v){if(typeof v[key]!=='boolean')throw new Error('设置无效');settings[key]=v[key]}}
+  if(settings.paused)desktopReview.clear();
   if('model' in v){if(typeof v.model!=='string'||!v.model.trim()||v.model.length>200)throw new Error('模型 ID 无效');settings.model=v.model.trim()}
   await atomic(join(dataDir(),'settings.json'),JSON.stringify(settings));await startWatch();changed();
  });
@@ -86,7 +100,7 @@ function handlers(){
  });
  register('review',async(id:unknown,status:unknown)=>{if(typeof id!=='string'||!['accepted','rejected'].includes(String(status)))throw new Error('审核参数无效');await store.review(id,status as 'accepted'|'rejected');changed()});
  register('export',async()=>{const file=await dialog.showSaveDialog({defaultPath:'personal-memory-export.json',filters:[{name:'JSON',extensions:['json']}]});if(file.canceled||!file.filePath)return false;await writeFile(file.filePath,JSON.stringify({version:1,exportedAt:new Date().toISOString(),prompts:store.prompts(),memories:store.memories()},null,2),{mode:0o600});return true});
- register('erase',async()=>{if(busy)throw new Error('请等待分析结束后再清空数据');const answer=await dialog.showMessageBox({type:'warning',message:'删除所有本地提问与记忆？',detail:'采集将暂停。原始平台文件不会被删除；重新开启采集会再次导入。此操作无法撤销。',buttons:['取消','删除'],defaultId:0,cancelId:0});if(answer.response!==1)return false;settings.paused=true;await atomic(join(dataDir(),'settings.json'),JSON.stringify(settings));await startWatch();await queue;await store.erase();for(const file of await readdir(join(dataDir(),'browser-inbox')).catch(()=>[]))if(file.endsWith('.json')||file.endsWith('.tmp'))await unlink(join(dataDir(),'browser-inbox',file));changed();return true});
+ register('erase',async()=>{if(busy)throw new Error('请等待分析结束后再清空数据');const answer=await dialog.showMessageBox({type:'warning',message:'删除所有本地提问与记忆？',detail:'采集将暂停。原始平台文件不会被删除；重新开启采集会再次导入。此操作无法撤销。',buttons:['取消','删除'],defaultId:0,cancelId:0});if(answer.response!==1)return false;settings.paused=true;await atomic(join(dataDir(),'settings.json'),JSON.stringify(settings));await startWatch();await queue;await store.erase();desktopReview.clear();for(const file of await readdir(join(dataDir(),'browser-inbox')).catch(()=>[]))if(file.endsWith('.json')||file.endsWith('.tmp'))await unlink(join(dataDir(),'browser-inbox',file));changed();return true});
  register('open-extension',()=>shell.openPath(app.isPackaged?join(process.resourcesPath,'browser-extension'):join(__dirname,'../browser-extension')));
  register('pair-browser',async(id:unknown,browser:unknown)=>{
   if(process.platform!=='darwin')throw new Error('桌面配对目前支持 macOS');

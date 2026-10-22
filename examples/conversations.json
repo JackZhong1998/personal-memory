@@ -1,0 +1,12 @@
+{
+  "format": "personal-memory.conversations.v1",
+  "provider": "doubao",
+  "conversations": [{
+    "id": "my-conversation-001",
+    "title": "产品需求示例",
+    "messages": [
+      {"id": "user-1", "role": "user", "text": "请使用白色背景。", "timestamp": "2026-10-22T08:00:00Z"},
+      {"id": "assistant-1", "role": "assistant", "text": "好的，这条助手回答不会被导入。"}
+    ]
+  }]
+}

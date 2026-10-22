@@ -4,7 +4,15 @@ export const presets=[
  {host:'manus.im',name:'Manus',selector:'[data-message-author-role="user"], [data-role="user"], .user-message'},
  {host:'manus.ai',name:'Manus',selector:'[data-message-author-role="user"], [data-role="user"], .user-message'},
  {host:'genspark.ai',name:'Genspark',selector:'[data-message-author-role="user"], [data-role="user"], .user-message'},
- {host:'chatgpt.com',name:'ChatGPT',selector:'[data-message-author-role="user"]'}
+ {host:'chatgpt.com',name:'ChatGPT',selector:'[data-message-author-role="user"]'},
+ {host:'doubao.com',name:'豆包',selector:'[data-testid="send_message"], [data-message-author-role="user"], [data-role="user"]'},
+ {host:'deepseek.com',name:'DeepSeek',selector:'[data-message-author-role="user"], [data-role="user"], [data-testid="user-message"]'},
+ {host:'kimi.com',name:'Kimi',selector:'.chat-item-user, [data-message-author-role="user"], [data-role="user"]'},
+ {host:'kimi.moonshot.cn',name:'Kimi',selector:'.chat-item-user, [data-message-author-role="user"], [data-role="user"]'},
+ {host:'tongyi.aliyun.com',name:'通义',selector:'[data-message-author-role="user"], [data-role="user"], [data-testid="user-message"]'},
+ {host:'qianwen.com',name:'通义',selector:'[data-message-author-role="user"], [data-role="user"], [data-testid="user-message"]'},
+ {host:'qwen.ai',name:'Qwen',selector:'[data-message-author-role="user"], [data-role="user"], .user-message'},
+ {host:'yuanbao.tencent.com',name:'腾讯元宝',selector:'.agent-chat__list__item--human, [data-message-author-role="user"], [data-role="user"]'}
 ];
 export const digest=async value=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))),b=>b.toString(16).padStart(2,'0')).join('');
 export function preset(url){const u=new URL(url);return presets.find(p=>u.hostname===p.host||u.hostname.endsWith('.'+p.host))??{name:u.hostname,selector:''}}

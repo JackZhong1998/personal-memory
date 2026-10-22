@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Prompt, Provider } from './types';
+import {validProvider} from './platform';
+import {parsePortableExport} from './portable-import';
 import {parseBrowserExport} from './browser-capture';
 type Row = Record<string, any>;
 export const hash = (value:string) => createHash('sha256').update(value).digest('hex');
@@ -34,13 +36,13 @@ export function parseJSONL(raw:string,provider:'codex'|'claude',source:string):P
  return result;
 }
 export function parseExport(raw:string,source:string):Prompt[]{
- const data=JSON.parse(raw);if(data.format==='tracelet.browser-export.v1')return parseBrowserExport(data);const conversations=Array.isArray(data)?data:Array.isArray(data.conversations)?data.conversations:[data];const result:Prompt[]=[];
+ const data=JSON.parse(raw);if(data.format==='personal-memory.conversations.v1')return parsePortableExport(data,source);if(data.format==='tracelet.browser-export.v1')return parseBrowserExport(data);const conversations=Array.isArray(data)?data:Array.isArray(data.conversations)?data.conversations:[data];const result:Prompt[]=[];
  for(const c of conversations){
   let provider:Provider;let messages:Row[];
   if(c.mapping&&typeof c.mapping==='object'){provider='chatgpt';messages=Object.values(c.mapping).map((n:any)=>n.message).filter(Boolean)}
   else if(Array.isArray(c.chat_messages)){provider='claude';messages=c.chat_messages}
-  else if(Array.isArray(c.messages)){provider='grok';messages=c.messages}
-  else throw new Error('不支持的导出结构。支持 ChatGPT conversations.json、Claude chat_messages、Grok messages（role/content）格式。');
+  else if(Array.isArray(c.messages)){const declared=c.provider??data.provider;if(!validProvider(declared))throw new Error('messages 格式无法确定来源平台，请明确填写 provider（如 grok、doubao）或使用通用导入格式。');provider=declared;messages=c.messages}
+  else throw new Error('不支持的导出结构。支持 ChatGPT conversations.json、Claude chat_messages、Grok messages（role/content）及 personal-memory.conversations.v1 通用格式。');
   const cid=String(c.uuid??c.id??c.conversation_id??hash(JSON.stringify(c)));
   messages.forEach((m,i)=>{const role=m.author?.role??m.sender??m.role;if(!['user','human'].includes(role))return;
    const body=textOf(m.text??m.content?.parts??m.content??m.message);if(!body.trim())return;

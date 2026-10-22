@@ -21,5 +21,18 @@ jobs:
       - run: npm run site:check
       - run: xvfb-run -a npm run smoke:electron
       - run: npm run check:workspace -- --no-sandbox --ozone-platform=headless --disable-gpu
+      - run: npm run check:desktop -- --no-sandbox --ozone-platform=headless --disable-gpu
       - run: npm run check:browser -- --no-sandbox --ozone-platform=headless --disable-gpu
       - run: npm run check:site-browser -- --no-sandbox --ozone-platform=headless --disable-gpu
+  native-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node scripts/build-native.mjs

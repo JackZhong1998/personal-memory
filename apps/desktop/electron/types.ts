@@ -1,4 +1,4 @@
-export type Provider = 'codex' | 'claude' | 'chatgpt' | 'grok' | 'manus' | 'genspark' | `custom:${string}`;
+export type Provider = 'codex' | 'claude' | 'chatgpt' | 'grok' | 'manus' | 'genspark' | 'doubao' | 'deepseek' | 'kimi' | 'qwen' | 'yuanbao' | 'cursor' | 'windsurf' | 'trae' | `custom:${string}`;
 export interface Prompt {id:string; provider:Provider; conversationId:string; conversationTitle:string; text:string; timestamp:string; source:string; capturedAt?:string; timeSource?:'platform'|'captured'}
 export interface Trace {id:string; provider:Provider; title:string; count:number; updatedAt:string}
 export type MemoryCategory='identity'|'preferences'|'needs'|'procedures'|'events';
@@ -11,6 +11,9 @@ export interface Settings {watchCodex:boolean; watchClaude:boolean; watchBrowser
 export interface Snapshot {traces:Trace[]; memories:Memory[]; settings:Settings; errors:string[]; promptCount:number}
 export interface AnalysisPreview {prompts:Prompt[]; truncated:boolean; characters:number; model:string; existingMemories:AnalysisMemory[]; contextCharacters:number; promptVersion:string}
 export interface Bridge {
+ desktopApps():Promise<DesktopApp[]>; desktopPermission():Promise<boolean>;
+ desktopPreview(pid:number):Promise<DesktopPreview>;
+ desktopCommit(token:string,ids:string[],provider:Provider,conversation:string):Promise<number>;
  snapshot():Promise<Snapshot>; prompts(traceId:string):Promise<Prompt[]>;
  settings(value:Partial<Pick<Settings,'watchCodex'|'watchClaude'|'watchBrowser'|'model'|'paused'>>):Promise<void>;
  saveKey(key:string):Promise<void>; removeKey():Promise<void>; models():Promise<{id:string;name:string}[]>;
@@ -20,3 +23,5 @@ export interface Bridge {
  pairBrowser(id:string,browser:'chrome'|'edge'):Promise<void>; openExtension():Promise<void>;
  onChange(callback:()=>void):()=>void;
 }
+export interface DesktopApp {pid:number; bundleId:string; name:string}
+export interface DesktopPreview {token:string; app:DesktopApp; title:string; capturedAt:string; truncated:boolean; nodes:{id:string;text:string}[]}

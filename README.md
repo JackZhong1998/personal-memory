@@ -6,7 +6,11 @@
 
 首版产品和官网已包含在此仓库。网站下载按钮读取发布清单，只有真实 Release 同时具有两个架构的 DMG 和校验文件时才启用。
 
-## 0.4.3 来源分类与浏览器采集
+## 0.5.0 桌面与多平台采集
+
+新增「采集来源」：Mac 辅助功能窗口预览 → 勾选用户提问 → 入库，适用于开放可访问文本的桌面客户端。豆包、ChatGPT、Claude、Cursor、Windsurf、Trae 及自定义平台均可独立归类；各客户端真实兼容性尚待逐一验收，不是全平台自动监听。新增豆包、DeepSeek、Kimi、通义、元宝网页模板和带来源的通用 JSON 导入。详见 [桌面采集与支持矩阵](docs/DESKTOP_CAPTURE.md)。
+
+## 来源分类与浏览器采集
 
 应用默认打开左右对照工作台：左侧查看对话原文，右侧按层级与状态查看记忆，支持定位证据、审核更新和查看历史。新版提炼区分长期个人、项目和会话情节，附逐字引文、范围与新增/更新/冲突/重复建议。相关旧记忆也会列入发送预览；替换必须手动确认。旧记录保留并显示未分层，旧提问可经用户选择后重新分析。
 
@@ -20,11 +24,11 @@
 | Claude Code | 监听 `~/.claude/projects/**/*.jsonl` | user 消息中的 text 块；排除 tool_result、meta 消息 |
 | ChatGPT | 导入 `conversations.json` | mapping 中的 user 消息，保留分支中的用户消息 |
 | Claude 网页版 | 导入 JSON | conversations 数组中的 `chat_messages`，sender 为 human/user |
-| Grok | 导入 JSON | `messages` 数组，role 为 user，content 为文本；导出格式不同需适配 |
+| Grok | 导入 JSON | `messages` 数组，须显式 `provider: "grok"`，role 为 user，content 为文本；其他格式需适配 |
 
 | 浏览器 AI 网站 / 自定义 HTTPS 站点 | Chrome / Edge 扩展 + Native Messaging / JSON 导出 | 当前页面已加载的用户文本；规则须预览验证 |
 
-采集默认关闭。新增 Chrome / Edge 扩展，支持逐站授权、用户消息预览、本地队列与 Mac 原生同步，详见 [浏览器采集说明](docs/BROWSER_CAPTURE.md)。内置 Claude、Grok、Manus、Genspark、ChatGPT 规则为待验证模板，自定义来源按域名独立分类。应用不监听键盘或屏幕，不提供 MCP 或自动将记忆注入第三方平台。文件布局可能随平台版本变化；解析异常会显示在应用中。JSONL 最后一条未写完时等待后续更新，不把半条内容当成新消息。
+采集默认关闭。新增 Chrome / Edge 扩展，支持逐站授权、用户消息预览、本地队列与 Mac 原生同步，详见 [浏览器采集说明](docs/BROWSER_CAPTURE.md)。内置豆包、DeepSeek、Kimi、通义、元宝、Claude、Grok、Manus、Genspark、ChatGPT 规则为待验证模板，自定义来源按域名独立分类。应用不监听键盘或屏幕，新增窗口采集需 macOS 辅助功能授权并人工选择用户消息；不提供 MCP 或自动将记忆注入第三方平台。文件布局可能随平台版本变化；解析异常会显示在应用中。JSONL 最后一条未写完时等待后续更新，不把半条内容当成新消息。
 
 ## 本地开发
 

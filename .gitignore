@@ -9,3 +9,5 @@ release/
 .local/
 
 browser-extension/
+
+dist-native/

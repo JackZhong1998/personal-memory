@@ -40,6 +40,7 @@ jobs:
       - run: npm run build
       - run: npm run smoke:electron
       - run: npm run check:workspace
+      - run: npm run check:desktop
       - run: npm run check:browser
       - name: Validate native macOS app icon
         run: iconutil --convert iconset assets/brand/icon.icns --output "$RUNNER_TEMP/personal-memory.iconset"

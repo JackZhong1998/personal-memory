@@ -2,10 +2,12 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {sourceStats,memoryProviders,fromPlatform} from '../src/provenance';
 import {existing,prompt} from './fixtures';
+import {builtins} from '../electron/platform';
 import type {Trace} from '../electron/types';
 test('Source statistics separate platforms even when conversation IDs or titles overlap',()=>{
  const traces:Trace[]=[{id:'codex:same',provider:'codex',title:'same',count:4,updatedAt:''},{id:'claude:same',provider:'claude',title:'same',count:3,updatedAt:''},{id:'codex:another',provider:'codex',title:'another',count:2,updatedAt:''}];
- assert.deepEqual(sourceStats(traces),[{provider:'codex',conversations:2,prompts:6},{provider:'claude',conversations:1,prompts:3},{provider:'chatgpt',conversations:0,prompts:0},{provider:'grok',conversations:0,prompts:0},{provider:'manus',conversations:0,prompts:0},{provider:'genspark',conversations:0,prompts:0}]);
+ assert.deepEqual(sourceStats(traces),builtins.map(provider=>({provider,conversations:traces.filter(t=>t.provider===provider).length,prompts:traces.filter(t=>t.provider===provider).reduce((n,t)=>n+t.count,0)})));
+ assert.equal(sourceStats(traces).find(s=>s.provider==='doubao')?.prompts,0);
 });
 test('Cross-platform memories retain all distinct evidence sources and match either filter',()=>{
  const memory=existing({evidence:[prompt(),{...prompt(),provider:'claude'},{...prompt(),provider:'codex'}]});

@@ -1,0 +1,27 @@
+const {app,BrowserWindow}=require('electron');
+const {mkdtempSync,writeFileSync,mkdirSync,rmSync}=require('node:fs');
+const {tmpdir}=require('node:os');const {join,resolve}=require('node:path');
+app.disableHardwareAcceleration();const root=mkdtempSync(join(tmpdir(),'pm-capture-ui-'));app.setPath('userData',root);
+const snapshot={traces:[],memories:[],promptCount:0,errors:[],settings:{watchCodex:false,watchClaude:false,watchBrowser:false,model:'deepseek/deepseek-v4-flash',keyPresent:false,keyStorageAvailable:false,paused:false}};
+writeFileSync(join(root,'preload.cjs'),`const {contextBridge}=require('electron');let calls=[];const snapshot=${JSON.stringify(snapshot)};contextBridge.exposeInMainWorld('tracelet',{snapshot:async()=>snapshot,onChange:()=>()=>{},desktopPermission:async()=>true,desktopApps:async()=>[{pid:42,bundleId:'example.doubao',name:'豆包'}],desktopPreview:async()=>{calls.push('preview');return {token:'reviewed-token',app:{pid:42,bundleId:'example.doubao',name:'豆包'},title:'需求',capturedAt:new Date().toISOString(),truncated:false,nodes:[{id:'0',text:'我想做 Mac 应用。'},{id:'1',text:'好的，我来帮你。'}]}},desktopCommit:async(...args)=>{calls.push(args);snapshot.traces=[{id:'doubao:desktop:session',provider:'doubao',title:'产品需求',count:1,updatedAt:new Date().toISOString()}];snapshot.promptCount=1;return 1},prompts:async()=>[{id:'captured',provider:'doubao',conversationId:'desktop:session',conversationTitle:'产品需求',text:'我想做 Mac 应用。',timestamp:new Date().toISOString(),timeSource:'captured',source:'desktop://example.doubao'}],testCalls:()=>calls});`);
+app.whenReady().then(async()=>{
+ const page=new BrowserWindow({width:1100,height:900,show:false,webPreferences:{offscreen:true,backgroundThrottling:false,preload:join(root,'preload.cjs'),sandbox:true,contextIsolation:true,nodeIntegration:false}});
+ await page.loadFile(resolve('dist/index.html'));page.setSize(1100,900);await new Promise(r=>setTimeout(r,250));
+ const run=code=>page.webContents.executeJavaScript(code);
+ const wait=async code=>{const until=Date.now()+7000;while(Date.now()<until){if(await run(code))return;await new Promise(r=>setTimeout(r,50))}throw new Error('UI condition failed: '+code)};
+ const click=async text=>{await run(`[...document.querySelectorAll('button')].find(b=>b.textContent.includes(${JSON.stringify(text)})).click()`)};
+ await wait(`!!document.querySelector('.sidebar')`);await click('采集来源');await wait(`!!document.querySelector('.desktop-sources')`);
+ await click('刷新应用列表');await wait(`document.querySelector('[aria-label="选择桌面应用"]').options.length===2`);
+ await run(`const select=document.querySelector('[aria-label="选择桌面应用"]');select.value='42';select.dispatchEvent(new Event('change',{bubbles:true}))`);
+ await wait(`[...document.querySelectorAll('button')].some(b=>b.textContent==='读取窗口预览'&&!b.disabled)`);await click('读取窗口预览');await wait(`document.querySelectorAll('.capture-candidate').length===2`);
+ if((await run(`window.tracelet.testCalls()`)).length!==1)throw new Error('Preview must not import automatically');
+ await run(`document.querySelector('[aria-label="保留文本 0"]').click()`);
+ await run(`const input=document.querySelector('[aria-label="桌面对话标识"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'产品需求');input.dispatchEvent(new Event('input',{bubbles:true}))`);
+ await wait(`[...document.querySelectorAll('button')].some(b=>b.textContent==='确认这些是我的提问并入库'&&!b.disabled)`);
+ if(await run(`document.documentElement.scrollWidth>innerWidth`))throw new Error('Capture page horizontal overflow: '+JSON.stringify(await run(`({width:innerWidth,scroll:document.documentElement.scrollWidth,elements:[...document.querySelectorAll('body *')].filter(e=>e.getBoundingClientRect().right>innerWidth+1).slice(0,8).map(e=>({tag:e.tagName,cls:e.className,width:e.getBoundingClientRect().width,right:e.getBoundingClientRect().right}))})`)));
+ await new Promise(r=>setTimeout(r,200));mkdirSync('.local',{recursive:true});writeFileSync('.local/desktop-capture.png',(await page.webContents.capturePage()).toPNG());
+ await click('确认这些是我的提问并入库');await wait(`document.body.innerText.includes('新增 1 条提问')`);
+ const calls=await run(`window.tracelet.testCalls()`);if(JSON.stringify(calls)!==JSON.stringify(['preview',['reviewed-token',['0'],'doubao','产品需求']]))throw new Error('Unreviewed text or wrong source imported: '+JSON.stringify(calls));
+ await click('记忆工作台');await wait(`document.querySelectorAll('[data-source-group="doubao"]').length===1&&document.body.innerText.includes('我想做 Mac 应用。')`);if(!await run(`document.body.innerText.includes('桌面窗口')&&!document.body.innerText.includes('好的，我来帮你。')`))throw new Error('Desktop data provenance or selected subset display failed');
+ console.log('DESKTOP_CAPTURE_UI_OK: app selection, explicit preview, user subset only, source/conversation, no automatic import, no overflow');page.destroy();app.quit();
+}).catch(e=>{console.error('::error::'+e.message);app.exit(1)});app.on('will-quit',()=>rmSync(root,{recursive:true,force:true}));
