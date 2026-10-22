@@ -40,7 +40,7 @@ const report=(e:unknown)=>{errors=[String(e instanceof Error?e.message:e),...err
 async function atomic(file:string,data:string|Buffer){await writeFile(file+'.tmp',data,{mode:0o600});await rename(file+'.tmp',file)}
 async function getKey(){try{return safeStorage.decryptString(await readFile(keyFile()))}catch(e:any){if(e.code==='ENOENT')return '';throw new Error('无法解锁 API Key。请重新保存 Key。')}}
 async function keyPresent(){try{await stat(keyFile());return true}catch{return false}}
-async function publicSettings(){return {...settings,keyPresent:await keyPresent(),keyStorageAvailable:safeStorage.isEncryptionAvailable()}}
+async function publicSettings(){return {...settings,keyPresent:await keyPresent(),keyStorageAvailable:!packageCheck&&safeStorage.isEncryptionAvailable()}}
 function show(){if(window){window.show();window.focus();return}
  window=new BrowserWindow({width:1250,height:850,minWidth:960,minHeight:680,title:'Personal Memory · 你的个人记忆层',icon:brandPath('icon.png'),show:!(smoke||packageCheck),backgroundColor:'#ffffff',webPreferences:{...((smoke||packageCheck)?{offscreen:true,backgroundThrottling:false}:{}),preload:join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
  window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
@@ -131,7 +131,7 @@ if(!app.requestSingleInstanceLock())app.quit();else{
    const deadline=Date.now()+20000;let ready=false;while(Date.now()<deadline){if(!window!.webContents.isLoading()){ready=await window!.webContents.executeJavaScript(`!!document.querySelector('.memory-workspace')&&!!document.querySelector('.sidebar')`);if(ready)break}await new Promise(r=>setTimeout(r,100))}
    if(!ready||store.count()!==0)throw new Error('Packaged renderer or empty SQLite failed');
    const apps=z.array(desktopAppSchema).parse(await nativeCapture(['--apps']));
-   console.log('PACKAGE_CHECK_OK v'+app.getVersion()+': packaged renderer, SQLite/WASM, native helper ('+apps.length+' running apps); no user data or AI request');app.quit();return;
+   console.log('PACKAGE_CHECK_OK v'+app.getVersion()+': packaged renderer, SQLite/WASM, native helper ('+apps.length+' running apps); isolated data, no AI request');app.quit();return;
   }
   if(smoke){await new Promise<void>(r=>{if(!window!.webContents.isLoading())r();else window!.webContents.once('did-finish-load',()=>r())});
    await window!.webContents.executeJavaScript(`window.tracelet.settings({watchCodex:true})`);

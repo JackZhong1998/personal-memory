@@ -1,6 +1,6 @@
 {
   "name": "personal-memory",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "private": true,
   "description": "A personal memory layer for your AI conversations",
   "main": "dist-electron/main.cjs",

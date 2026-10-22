@@ -8,7 +8,20 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: write
     steps:
+      - name: Cancel superseded v0.5.2 investigation
+        if: github.ref == 'refs/tags/v0.5.3'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          state=$(gh run view 39784277257 --repo JackZhong1998/personal-memory --json status --jq .status)
+          if [ "$state" != completed ]; then
+            gh run cancel 39784277257 --repo JackZhong1998/personal-memory
+          fi
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -20,6 +33,7 @@ jobs:
       - run: npm run build
       - run: npm run site:check
   build:
+    timeout-minutes: 15
     needs: validate
     strategy:
       fail-fast: false
