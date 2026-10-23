@@ -1,21 +1,26 @@
 import { app, BrowserWindow, ipcMain, dialog, safeStorage, Tray, Menu, nativeImage, shell, systemPreferences } from 'electron';
 import { readFile, writeFile, mkdir, rename, unlink, stat, readdir, chmod } from 'node:fs/promises';
-import { join, resolve, basename, sep } from 'node:path';
+import { join, resolve, basename, dirname, isAbsolute, sep } from 'node:path';
 import {spawn,execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {DesktopReview,desktopAppSchema,desktopReadSchema} from './desktop-capture';
 import {z} from 'zod';
+import {syncCodexFiles} from './history-sync';
+import {validProvider} from './platform';
 import { homedir, tmpdir } from 'node:os';
 import { watch, type FSWatcher } from 'chokidar';
 import {browserPrompts,frame} from './browser-capture';
 import { Store } from './store';
 import { parseJSONL, parseExport } from './parsers';
 import { preview, digest, analyze, sameScope } from './analyzer';
-import type { Settings } from './types';
+import type { Settings, HistorySyncState, Provider } from './types';
 
 let window:BrowserWindow|null=null;let tray:Tray;let store:Store;let quitting=false;let watcher:FSWatcher|undefined;
 let settings:Omit<Settings,'keyPresent'|'keyStorageAvailable'>={watchCodex:false,watchClaude:false,watchBrowser:false,model:'deepseek/deepseek-v4-flash',paused:false};
 let browserWatcher:FSWatcher|undefined;
+let historySync:HistorySyncState|undefined;let historyAbort:AbortController|undefined;let historyTask:Promise<HistorySyncState>|undefined;
+const codexHome=()=>resolve(settings.codexHome||process.env.CODEX_HOME||join(homedir(),'.codex'));
+const codexRoots=()=>['sessions','archived_sessions'].map(name=>join(codexHome(),name));
 let errors:string[]=[];let busy=false;let queue=Promise.resolve();
 // Keep the legacy OS identity for Keychain/safeStorage and existing user data.
 app.setName('Tracelet');
@@ -40,7 +45,7 @@ const report=(e:unknown)=>{errors=[String(e instanceof Error?e.message:e),...err
 async function atomic(file:string,data:string|Buffer){await writeFile(file+'.tmp',data,{mode:0o600});await rename(file+'.tmp',file)}
 async function getKey(){try{return safeStorage.decryptString(await readFile(keyFile()))}catch(e:any){if(e.code==='ENOENT')return '';throw new Error('无法解锁 API Key。请重新保存 Key。')}}
 async function keyPresent(){try{await stat(keyFile());return true}catch{return false}}
-async function publicSettings(){return {...settings,keyPresent:await keyPresent(),keyStorageAvailable:!packageCheck&&safeStorage.isEncryptionAvailable()}}
+async function publicSettings(){return {...settings,codexHome:codexHome(),keyPresent:await keyPresent(),keyStorageAvailable:!packageCheck&&safeStorage.isEncryptionAvailable()}}
 function show(){if(window){window.show();window.focus();return}
  window=new BrowserWindow({width:1250,height:850,minWidth:960,minHeight:680,title:'Personal Memory · 你的个人记忆层',icon:brandPath('icon.png'),show:!(smoke||packageCheck),backgroundColor:'#ffffff',webPreferences:{...((smoke||packageCheck)?{offscreen:true,backgroundThrottling:false}:{}),preload:join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
  window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
@@ -67,7 +72,7 @@ async function startWatch(){await browserWatcher?.close();browserWatcher=undefin
  }
  await watcher?.close();watcher=undefined;if(settings.paused)return;
  const paths:{path:string;provider:'codex'|'claude'}[]=[];
- if(settings.watchCodex)paths.push({path:resolve(process.env.CODEX_HOME||join(homedir(),'.codex'),'sessions'),provider:'codex'});
+ if(settings.watchCodex)paths.push(...codexRoots().map(path=>({path,provider:'codex' as const})));
  if(settings.watchClaude)paths.push({path:join(homedir(),'.claude','projects'),provider:'claude'});
  if(!paths.length)return;
  watcher=watch(paths.map(p=>p.path),{ignoreInitial:false,followSymlinks:false,awaitWriteFinish:{stabilityThreshold:700,pollInterval:150},ignored:(p,s)=>!!s?.isFile()&&!p.endsWith('.jsonl')});
@@ -76,25 +81,50 @@ async function startWatch(){await browserWatcher?.close();browserWatcher=undefin
 }
 function selected(ids:unknown){if(!Array.isArray(ids)||ids.length>1000||ids.some(i=>typeof i!=='string'))throw new Error('对话选择无效');return store.prompts().filter(p=>ids.includes(`${p.provider}:${p.conversationId}`))}
 function handlers(){
+ register('sync-codex-history',async()=>{
+  if(settings.paused)throw new Error('采集已暂停，请先恢复采集再同步历史');
+  if(historyTask)return historyTask;
+  const controller=new AbortController();historyAbort=controller;
+  historyTask=syncCodexFiles(codexRoots(),rows=>settings.paused||controller.signal.aborted?Promise.resolve(0):store.upsert(rows),controller.signal,state=>{historySync=state;changed()});
+  try{return await historyTask}finally{historyTask=undefined;historyAbort=undefined}
+ });
+ register('cancel-history-sync',()=>{historyAbort?.abort()});
+ register('choose-codex-home',async()=>{
+  if(historyTask)throw new Error('请先停止历史同步');
+  const result=await dialog.showOpenDialog({title:'选择 Codex 数据目录（包含 sessions 或 archived_sessions）',defaultPath:codexHome(),properties:['openDirectory','showHiddenFiles']});
+  if(result.canceled)return false;let selected=resolve(result.filePaths[0]);if(['sessions','archived_sessions'].includes(basename(selected)))selected=dirname(selected);
+  const exists=await Promise.all(['sessions','archived_sessions'].map(async name=>{try{return (await stat(join(selected,name))).isDirectory()}catch{return false}}));
+  if(!exists.some(Boolean))throw new Error('此目录下没有 sessions 或 archived_sessions，请选择 Codex 的数据目录');
+  settings.codexHome=selected;historySync=undefined;await atomic(join(dataDir(),'settings.json'),JSON.stringify(settings));await startWatch();changed();return true;
+ });
  register('desktop-apps',async()=>z.array(desktopAppSchema).parse(await nativeCapture(['--apps'])));
  register('desktop-permission',()=>{if(process.platform!=='darwin')throw new Error('窗口采集仅支持 macOS');return systemPreferences.isTrustedAccessibilityClient(true)});
  register('desktop-preview',async(pid:unknown)=>{desktopReview.clear();if(settings.paused)throw new Error('采集已暂停，请先恢复');if(typeof pid!=='number'||!Number.isInteger(pid)||pid<=0)throw new Error('请选择正在运行的应用');const raw=desktopReadSchema.parse(await nativeCapture(['--read',String(pid)]));if(settings.paused)throw new Error('采集已暂停');if(raw.app.pid!==pid)throw new Error('应用已变化，请刷新列表');return desktopReview.stage(raw)});
  register('desktop-commit',async(token:unknown,ids:unknown,provider:unknown,conversation:unknown)=>{if(settings.paused)throw new Error('采集已暂停');const rows=desktopReview.confirm(token,ids,provider,conversation);const added=await store.upsert(rows);desktopReview.clear();changed();return added});
- register('snapshot',async()=>({traces:store.traces(),memories:store.memories(),settings:await publicSettings(),errors,promptCount:store.count()}));
+ register('snapshot',async()=>({traces:store.traces(),memories:store.memories(),settings:await publicSettings(),historySync,errors,promptCount:store.count()}));
  register('prompts',(id:unknown)=>{if(typeof id!=='string')throw new Error('对话 ID 无效');return store.prompts(id)});
  register('settings',async(value:unknown)=>{if(!value||typeof value!=='object')throw new Error('设置无效');const v=value as Record<string,unknown>;
   for(const key of ['watchCodex','watchClaude','watchBrowser','paused'] as const){if(key in v){if(typeof v[key]!=='boolean')throw new Error('设置无效');settings[key]=v[key]}}
-  if(settings.paused)desktopReview.clear();
+  if(settings.paused){desktopReview.clear();historyAbort?.abort()}
   if('model' in v){if(typeof v.model!=='string'||!v.model.trim()||v.model.length>200)throw new Error('模型 ID 无效');settings.model=v.model.trim()}
   await atomic(join(dataDir(),'settings.json'),JSON.stringify(settings));await startWatch();changed();
  });
  register('save-key',async(key:unknown)=>{if(typeof key!=='string'||!key.startsWith('sk-or-')||key.length>1000)throw new Error('请输入有效的 OpenRouter API Key');if(!safeStorage.isEncryptionAvailable())throw new Error('系统钥匙串不可用，未保存 Key');await atomic(keyFile(),safeStorage.encryptString(key.trim()));changed()});
  register('remove-key',async()=>{await unlink(keyFile()).catch((e:any)=>{if(e.code!=='ENOENT')throw e});changed()});
  register('models',async()=>{const r=await fetch('https://openrouter.ai/api/v1/models',{signal:AbortSignal.timeout(20000)});if(!r.ok)throw new Error('无法获取模型列表 ('+r.status+')');const json:any=await r.json();return json.data.filter((m:any)=>typeof m.id==='string'&&m.id.startsWith('deepseek/')).map((m:any)=>({id:m.id,name:m.name}))});
- register('import',async()=>{const file=await dialog.showOpenDialog({title:'导入对话文件',properties:['openFile'],filters:[{name:'对话导出',extensions:['json','jsonl']}]});if(file.canceled)return {added:0,message:'已取消'};
-  const path=file.filePaths[0];if((await stat(path)).size>100*1024*1024)throw new Error('导入文件不能超过 100 MB');const raw=await readFile(path,'utf8');
-  let prompts;if(path.endsWith('.jsonl')){const provider: 'codex'|'claude'=raw.includes('"session_meta"')||raw.includes('"response_item"')||raw.includes('"event_msg"')?'codex':'claude';prompts=parseJSONL(raw,provider,path)}else prompts=parseExport(raw,path);
-  if(!prompts.length)throw new Error('文件中没有可识别的用户提问');const added=await store.upsert(prompts);changed();return {added,message:`已同步 ${prompts.length} 条提问，新增 ${added} 条。`};
+ register('import',async(hint:unknown)=>{
+  if(settings.paused)throw new Error('采集已暂停，请先恢复采集再导入');
+  if(hint!==undefined&&!validProvider(hint))throw new Error('来源平台无效');const provider=hint as Provider|undefined;
+  const files=await dialog.showOpenDialog({title:provider==='doubao'?'批量导入豆包历史 JSON':'批量导入对话文件',properties:['openFile','multiSelections'],filters:[{name:'对话导出',extensions:provider?['json']:['json','jsonl']}]});
+  if(files.canceled)return {added:0,message:'已取消'};
+  let added=0,success=0;const failures:string[]=[];
+  for(const path of files.filePaths){if(settings.paused){failures.push('采集已暂停，其余文件未导入');break}try{
+   if((await stat(path)).size>100*1024*1024)throw new Error('文件超过 100 MB');const raw=await readFile(path,'utf8');
+   let prompts;if(path.endsWith('.jsonl')){if(provider)throw new Error('此入口仅支持 JSON');const source:'codex'|'claude'=raw.includes('"session_meta"')||raw.includes('"response_item"')||raw.includes('"event_msg"')?'codex':'claude';prompts=parseJSONL(raw,source,path)}else prompts=parseExport(raw,path,provider);
+   if(!prompts.length)throw new Error('没有可识别的用户提问');if(provider&&prompts.some(p=>p.provider!==provider))throw new Error('文件声明的来源与所选平台不符，未导入');
+   if(settings.paused)throw new Error('采集已暂停，未导入');added+=await store.upsert(prompts);success++;changed();
+  }catch(e){failures.push(basename(path)+': '+(e instanceof Error?e.message:String(e)))}}
+  return {added,message:`已处理 ${success}/${files.filePaths.length} 个文件，新增 ${added} 条提问（重复记录不再新增）。`+(failures.length?'\n'+failures.slice(0,5).join('\n'):'')};
  });
  register('preview',(ids:unknown)=>{const p=preview(store.unanalyzed(selected(ids)),settings.model,store.memories());return {...p,digest:digest(p)}});
  register('analyze',async(ids:unknown,approvedDigest:unknown)=>{if(busy)throw new Error('分析正在进行中');const p=preview(store.unanalyzed(selected(ids)),settings.model,store.memories());if(digest(p)!==approvedDigest)throw new Error('内容或参考记忆已更新，请重新预览后再发送');if(!p.prompts.length)throw new Error('所选对话没有待分析的新提问');
@@ -102,7 +132,7 @@ function handlers(){
  });
  register('review',async(id:unknown,status:unknown)=>{if(typeof id!=='string'||!['accepted','rejected'].includes(String(status)))throw new Error('审核参数无效');await store.review(id,status as 'accepted'|'rejected');changed()});
  register('export',async()=>{const file=await dialog.showSaveDialog({defaultPath:'personal-memory-export.json',filters:[{name:'JSON',extensions:['json']}]});if(file.canceled||!file.filePath)return false;await writeFile(file.filePath,JSON.stringify({version:1,exportedAt:new Date().toISOString(),prompts:store.prompts(),memories:store.memories()},null,2),{mode:0o600});return true});
- register('erase',async()=>{if(busy)throw new Error('请等待分析结束后再清空数据');const answer=await dialog.showMessageBox({type:'warning',message:'删除所有本地提问与记忆？',detail:'采集将暂停。原始平台文件不会被删除；重新开启采集会再次导入。此操作无法撤销。',buttons:['取消','删除'],defaultId:0,cancelId:0});if(answer.response!==1)return false;settings.paused=true;await atomic(join(dataDir(),'settings.json'),JSON.stringify(settings));await startWatch();await queue;await store.erase();desktopReview.clear();for(const file of await readdir(join(dataDir(),'browser-inbox')).catch(()=>[]))if(file.endsWith('.json')||file.endsWith('.tmp'))await unlink(join(dataDir(),'browser-inbox',file));changed();return true});
+ register('erase',async()=>{if(busy)throw new Error('请等待分析结束后再清空数据');const answer=await dialog.showMessageBox({type:'warning',message:'删除所有本地提问与记忆？',detail:'采集将暂停。原始平台文件不会被删除；重新开启采集会再次导入。此操作无法撤销。',buttons:['取消','删除'],defaultId:0,cancelId:0});if(answer.response!==1)return false;settings.paused=true;historyAbort?.abort();await historyTask;await atomic(join(dataDir(),'settings.json'),JSON.stringify(settings));await startWatch();await queue;await store.erase();desktopReview.clear();for(const file of await readdir(join(dataDir(),'browser-inbox')).catch(()=>[]))if(file.endsWith('.json')||file.endsWith('.tmp'))await unlink(join(dataDir(),'browser-inbox',file));changed();return true});
  register('open-extension',()=>shell.openPath(app.isPackaged?join(process.resourcesPath,'browser-extension'):join(__dirname,'../browser-extension')));
  register('pair-browser',async(id:unknown,browser:unknown)=>{
   if(process.platform!=='darwin')throw new Error('桌面配对目前支持 macOS');
@@ -120,7 +150,7 @@ function handlers(){
 if(!app.requestSingleInstanceLock())app.quit();else{
  app.on('second-instance',show);
  app.whenReady().then(async()=>{app.setAboutPanelOptions({applicationName:'Personal Memory',applicationVersion:app.getVersion()});await mkdir(dataDir(),{recursive:true,mode:0o700});
-  try{const saved=JSON.parse(await readFile(join(dataDir(),'settings.json'),'utf8'));for(const key of ['watchCodex','watchClaude','watchBrowser','paused'] as const)if(typeof saved[key]==='boolean')settings[key]=saved[key];if(typeof saved.model==='string'&&saved.model.trim())settings.model=saved.model}catch(e:any){if(e.code!=='ENOENT')report(new Error('设置文件损坏，已使用默认设置。'))}
+  try{const saved=JSON.parse(await readFile(join(dataDir(),'settings.json'),'utf8'));for(const key of ['watchCodex','watchClaude','watchBrowser','paused'] as const)if(typeof saved[key]==='boolean')settings[key]=saved[key];if(typeof saved.codexHome==='string'&&isAbsolute(saved.codexHome))settings.codexHome=saved.codexHome;if(typeof saved.model==='string'&&saved.model.trim())settings.model=saved.model}catch(e:any){if(e.code!=='ENOENT')report(new Error('设置文件损坏，已使用默认设置。'))}
   store=await new Store(join(dataDir(),'tracelet.sqlite')).open();handlers();
   const icon=nativeImage.createFromPath(brandPath('trayTemplate.png'));if(icon.isEmpty())throw new Error('应用图标缺失');if(process.platform==='darwin'){icon.setTemplateImage(true);app.dock?.setIcon(brandPath('icon.png'))}
   if(!packageCheck&&!(smoke&&process.platform==='linux'&&!process.env.DISPLAY)){tray=new Tray(icon);tray.setTitle('');tray.setToolTip('Personal Memory · 个人记忆');tray.setContextMenu(Menu.buildFromTemplate([{label:'打开 Personal Memory',click:show},{label:'退出',click:()=>app.quit()}]));tray.on('click',show)}
@@ -134,6 +164,9 @@ if(!app.requestSingleInstanceLock())app.quit();else{
    console.log('PACKAGE_CHECK_OK v'+app.getVersion()+': packaged renderer, SQLite/WASM, native helper ('+apps.length+' running apps); isolated data, no AI request');app.quit();return;
   }
   if(smoke){await new Promise<void>(r=>{if(!window!.webContents.isLoading())r();else window!.webContents.once('did-finish-load',()=>r())});
+   const historyResult=await window!.webContents.executeJavaScript('window.tracelet.syncCodexHistory()');
+   if(historyResult.added!==2||historyResult.processed!==2||historyResult.skipped!==0)throw new Error('Smoke failed: complete historical sessions/archive scan');
+   if((await window!.webContents.executeJavaScript('window.tracelet.syncCodexHistory()')).added!==0)throw new Error('Smoke failed: repeated history sync duplicated prompts');
    await window!.webContents.executeJavaScript(`window.tracelet.settings({watchCodex:true})`);
    const deadline=Date.now()+15000;let count=0;while(Date.now()<deadline){const s=await window!.webContents.executeJavaScript('window.tracelet.snapshot()');count=s.promptCount;if(count===2)break;await new Promise(r=>setTimeout(r,200))}
    if(count!==2)throw new Error('Smoke failed: watcher did not ingest exactly 2 prompts');
@@ -158,10 +191,10 @@ if(!app.requestSingleInstanceLock())app.quit();else{
    const response=Buffer.concat(responses);if(hostCode!==0||response.length<4||!JSON.parse(response.subarray(4,4+response.readUInt32LE()).toString()).ok)throw new Error('Smoke failed: compiled browser native host');
    const browserDeadline=Date.now()+5000;while(Date.now()<browserDeadline&&store.count()!==3)await new Promise(r=>setTimeout(r,100));
    const browserPrompt=store.prompts().find(p=>p.provider==='grok');if(store.count()!==3||browserPrompt?.timeSource!=='captured'||browserPrompt?.source!=='https://grok.com/c/smoke')throw new Error('Smoke failed: native inbox watcher');
-   console.log('TRACELET_SMOKE_OK: watcher, SQLite/WASM, split workspace, evidence navigation, human review, exact outgoing preview, compiled native host and browser inbox; no AI request sent');app.quit();
+   console.log('TRACELET_SMOKE_OK: history scan (sessions + archives), repeated sync deduplication, watcher, SQLite/WASM, split workspace, evidence navigation, human review, exact outgoing preview, compiled native host and browser inbox; no AI request sent');app.quit();
   }
  }).catch(e=>{if(smoke||packageCheck){console.error('::error::TRACELET_SMOKE_FAILED: '+String(e.message));app.exit(1)}else{dialog.showErrorBox('Personal Memory 启动失败',String(e.message));app.quit()}});
  app.on('activate',()=>{if(store)show()});
- app.on('before-quit',()=>{quitting=true;void watcher?.close();void browserWatcher?.close()});
+ app.on('before-quit',()=>{quitting=true;historyAbort?.abort();void watcher?.close();void browserWatcher?.close()});
  app.on('window-all-closed',()=>{});
 }

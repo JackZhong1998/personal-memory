@@ -22,6 +22,7 @@ jobs:
       - run: xvfb-run -a npm run smoke:electron
       - run: npm run check:workspace -- --no-sandbox --ozone-platform=headless --disable-gpu
       - run: npm run check:desktop -- --no-sandbox --ozone-platform=headless --disable-gpu
+      - run: npm run check:history -- --no-sandbox --ozone-platform=headless --disable-gpu
       - run: npm run check:browser -- --no-sandbox --ozone-platform=headless --disable-gpu
       - run: npm run check:site-browser -- --no-sandbox --ozone-platform=headless --disable-gpu
   native-macos:

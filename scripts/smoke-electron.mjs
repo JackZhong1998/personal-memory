@@ -1,4 +1,4 @@
-import {mkdtemp,writeFile,mkdir,rm} from 'node:fs/promises';
+import {mkdtemp,writeFile,mkdir,rm,copyFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {spawn} from 'node:child_process';
@@ -9,6 +9,7 @@ await writeFile(join(root,'codex/sessions/smoke.jsonl'),[
  {type:'response_item',timestamp:'2026-01-01T00:00:00Z',payload:{role:'user',content:[{type:'input_text',text:'请用中文回答。'}]}},
  {type:'response_item',timestamp:'2026-01-01T00:01:00Z',payload:{role:'user',content:[{type:'input_text',text:'我在开发 Mac 应用。'}]}}
 ].map(r=>JSON.stringify(r)).join('\n')+'\n');
+await mkdir(join(root,'codex/archived_sessions'),{recursive:true});await copyFile(join(root,'codex/sessions/smoke.jsonl'),join(root,'codex/archived_sessions/smoke.jsonl'));
 const args=['.','--smoke','--disable-gpu'];if(process.platform==='linux')args.push('--no-sandbox');
 if(process.platform==='linux'&&!process.env.DISPLAY)args.push('--ozone-platform=headless','--disable-gpu');
 let output='';const child=spawn(electron,args,{env:{...process.env,TRACELET_SMOKE_DATA:join(root,'data'),CODEX_HOME:join(root,'codex')},stdio:['ignore','pipe','pipe']});

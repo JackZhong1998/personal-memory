@@ -1,6 +1,6 @@
 {
   "name": "personal-memory",
-  "version": "0.5.3",
+  "version": "0.6.0",
   "private": true,
   "description": "A personal memory layer for your AI conversations",
   "main": "dist-electron/main.cjs",
@@ -21,6 +21,7 @@
     "check:site-browser": "electron scripts/check-browser.cjs",
     "build:brand": "electron scripts/build-brand.cjs",
     "build:native": "node scripts/build-native.mjs",
+    "check:history": "electron scripts/check-history-sync.cjs",
     "check:desktop": "electron scripts/check-desktop-capture.cjs",
     "check:mac-package": "node scripts/verify-mac-package.mjs"
   },
