@@ -1,5 +1,5 @@
 export type Provider = 'codex' | 'claude' | 'chatgpt' | 'grok' | 'manus' | 'genspark' | 'doubao' | 'deepseek' | 'kimi' | 'qwen' | 'yuanbao' | 'cursor' | 'windsurf' | 'trae' | `custom:${string}`;
-export interface Prompt {id:string; provider:Provider; conversationId:string; conversationTitle:string; text:string; timestamp:string; source:string; capturedAt?:string; timeSource?:'platform'|'captured'; sourceKeys?:string[]; legacyIds?:string[]}
+export interface Prompt {id:string; provider:Provider; conversationId:string; conversationTitle:string; text:string; timestamp:string; source:string; capturedAt?:string; timeSource?:'platform'|'captured'; sourceKeys?:string[]; legacyIds?:string[]; sequence?:number}
 export interface Trace {id:string; provider:Provider; title:string; count:number; updatedAt:string}
 export type MemoryCategory='identity'|'preferences'|'needs'|'procedures'|'events';
 export interface MemoryScope {kind:'global'|'project'|'conversation'; label:string}
@@ -7,11 +7,15 @@ export interface Memory {id:string; category:MemoryCategory; claim:string; evide
  layer?:'profile'|'project'|'episode'; scope?:MemoryScope; basis?:'explicit'|'inferred'; action?:'add'|'update'|'conflict'; relatedMemoryId?:string; rationale?:string; evidenceQuotes?:{promptId:string;quote:string}[]; validFrom?:string|null; expiresAt?:string|null; analysisVersion?:string; model?:string; supersededBy?:string;
 }
 export type AnalysisMemory=Pick<Memory,'id'|'category'|'claim'|'layer'|'scope'|'basis'|'validFrom'|'expiresAt'>;
-export interface Settings {watchCodex:boolean; watchClaude:boolean; watchBrowser:boolean; model:string; keyPresent:boolean; keyStorageAvailable:boolean; paused:boolean; codexHome?:string}
+export interface Settings {watchCodex:boolean; watchClaude:boolean; watchBrowser:boolean; model:string; keyPresent:boolean; keyStorageAvailable:boolean; paused:boolean; codexHome?:string; collectionVersion?:number}
 export interface Snapshot {traces:Trace[]; memories:Memory[]; settings:Settings; errors:string[]; promptCount:number; historySync?:HistorySyncState}
 export interface AnalysisPreview {prompts:Prompt[]; truncated:boolean; characters:number; model:string; existingMemories:AnalysisMemory[]; contextCharacters:number; promptVersion:string}
-export interface HistorySyncState {running:boolean; total:number; processed:number; added:number; skipped:number; cancelled:boolean; roots:string[]; missing:string[]; errors:string[]}
+export interface HistorySyncState {running:boolean; total:number; processed:number; added:number; skipped:number; cancelled:boolean; provider?:'codex'|'claude'; roots:string[]; missing:string[]; errors:string[]}
+export interface LocalConnection {provider:'codex'|'claude'; roots:string[];enabled:boolean;available:boolean;state:'watching'|'off'|'paused'|'missing'|'error';errors:string[]}
+export interface BrowserConnection {configured:('chrome'|'edge')[];responding:boolean;lastSeenAt?:string;lastReceivedAt?:string;version?:string;enabledSites?:number;pending?:number;sites?:{host:string;enabled:boolean}[]}
+export interface ConnectionsState {local:LocalConnection[];browser:BrowserConnection;accessibility:boolean}
 export interface Bridge {
+ connections():Promise<ConnectionsState>;syncLocalHistory(provider:'codex'|'claude'):Promise<HistorySyncState>;
  syncCodexHistory():Promise<HistorySyncState>; cancelHistorySync():Promise<void>; chooseCodexHome():Promise<boolean>;
  desktopApps():Promise<DesktopApp[]>; desktopPermission():Promise<boolean>;
  desktopPreview(pid:number):Promise<DesktopPreview>;

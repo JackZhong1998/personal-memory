@@ -5,6 +5,8 @@ import {spawn,execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {DesktopReview,desktopAppSchema,desktopReadSchema} from './desktop-capture';
 import {z} from 'zod';
+import {browserConnection,localConnection} from './connections';
+import {ANALYSIS_ENABLED} from './memory-prompt';
 import {syncCodexFiles} from './history-sync';
 import {validProvider} from './platform';
 import { homedir, tmpdir } from 'node:os';
@@ -16,10 +18,11 @@ import { preview, digest, analyze, sameScope } from './analyzer';
 import type { Settings, HistorySyncState, Provider } from './types';
 
 let window:BrowserWindow|null=null;let tray:Tray;let store:Store;let quitting=false;let watcher:FSWatcher|undefined;
-let settings:Omit<Settings,'keyPresent'|'keyStorageAvailable'>={watchCodex:false,watchClaude:false,watchBrowser:false,model:'deepseek/deepseek-v4-flash',paused:false};
+let settings:Omit<Settings,'keyPresent'|'keyStorageAvailable'>={watchCodex:true,watchClaude:true,watchBrowser:false,model:'deepseek/deepseek-v4-flash',paused:false};
 let browserWatcher:FSWatcher|undefined;
 let historySync:HistorySyncState|undefined;let historyAbort:AbortController|undefined;let historyTask:Promise<HistorySyncState>|undefined;
 const codexHome=()=>resolve(settings.codexHome||process.env.CODEX_HOME||join(homedir(),'.codex'));
+const claudeRoots=()=>[join(homedir(),'.claude','projects')];
 const codexRoots=()=>['sessions','archived_sessions'].map(name=>join(codexHome(),name));
 let errors:string[]=[];let busy=false;let queue=Promise.resolve();
 // Keep the legacy OS identity for Keychain/safeStorage and existing user data.
@@ -81,12 +84,20 @@ async function startWatch(){await browserWatcher?.close();browserWatcher=undefin
 }
 function selected(ids:unknown){if(!Array.isArray(ids)||ids.length>1000||ids.some(i=>typeof i!=='string'))throw new Error('对话选择无效');return store.prompts().filter(p=>ids.includes(`${p.provider}:${p.conversationId}`))}
 function handlers(){
- register('sync-codex-history',async()=>{
-  if(settings.paused)throw new Error('采集已暂停，请先恢复采集再同步历史');
-  if(historyTask)return historyTask;
+ const syncLocal=async(provider:unknown)=>{
+  if(provider!=='codex'&&provider!=='claude')throw new Error('未知本地来源');
+  if(settings.paused)throw new Error('采集已暂停，请先恢复采集');
+  if(historyTask){if(historySync?.provider!==provider)throw new Error('另一个应用正在同步，请稍候');return historyTask}
   const controller=new AbortController();historyAbort=controller;
-  historyTask=syncCodexFiles(codexRoots(),rows=>settings.paused||controller.signal.aborted?Promise.resolve(0):store.upsert(rows),controller.signal,state=>{historySync=state;changed()});
+  historyTask=syncCodexFiles(provider==='codex'?codexRoots():claudeRoots(),rows=>settings.paused||controller.signal.aborted?Promise.resolve(0):store.upsert(rows),controller.signal,state=>{historySync=state;changed()},provider);
   try{return await historyTask}finally{historyTask=undefined;historyAbort=undefined}
+ };
+ register('sync-codex-history',()=>syncLocal('codex'));
+ register('sync-local-history',syncLocal);
+ register('connections',async()=>{
+  const configured:('chrome'|'edge')[]=[];
+  for(const browser of ['chrome','edge'] as const)try{const dir=join(homedir(),'Library/Application Support',browser==='chrome'?'Google/Chrome':'Microsoft Edge','NativeMessagingHosts');const manifest=JSON.parse(await readFile(join(dir,'app.tracelet.browser.json'),'utf8'));if(manifest.name==='app.tracelet.browser'&&Array.isArray(manifest.allowed_origins)&&manifest.allowed_origins.length&&manifest.path===join(dataDir(),'browser-host.sh')){await stat(manifest.path);configured.push(browser)}}catch{}
+  return {local:await Promise.all([localConnection('codex',codexRoots(),settings.watchCodex,settings.paused),localConnection('claude',claudeRoots(),settings.watchClaude,settings.paused)]),browser:await browserConnection(dataDir(),configured),accessibility:process.platform==='darwin'&&systemPreferences.isTrustedAccessibilityClient(false)};
  });
  register('cancel-history-sync',()=>{historyAbort?.abort()});
  register('choose-codex-home',async()=>{
@@ -127,7 +138,7 @@ function handlers(){
   return {added,message:`已处理 ${success}/${files.filePaths.length} 个文件，新增 ${added} 条提问（重复记录不再新增）。`+(failures.length?'\n'+failures.slice(0,5).join('\n'):'')};
  });
  register('preview',(ids:unknown)=>{const p=preview(store.unanalyzed(selected(ids)),settings.model,store.memories());return {...p,digest:digest(p)}});
- register('analyze',async(ids:unknown,approvedDigest:unknown)=>{if(busy)throw new Error('分析正在进行中');const p=preview(store.unanalyzed(selected(ids)),settings.model,store.memories());if(digest(p)!==approvedDigest)throw new Error('内容或参考记忆已更新，请重新预览后再发送');if(!p.prompts.length)throw new Error('所选对话没有待分析的新提问');
+ register('analyze',async(ids:unknown,approvedDigest:unknown)=>{if(!ANALYSIS_ENABLED)throw new Error('记忆分析已暂停；当前仅展示提炼协议和已有结果');if(busy)throw new Error('分析正在进行中');const p=preview(store.unanalyzed(selected(ids)),settings.model,store.memories());if(digest(p)!==approvedDigest)throw new Error('内容或参考记忆已更新，请重新预览后再发送');if(!p.prompts.length)throw new Error('所选对话没有待分析的新提问');
   const key=await getKey();if(!key)throw new Error('请先在设置中保存 API Key');busy=true;try{const memories=await analyze(p,key);const existing=store.memories().filter(m=>m.status==='pending'||m.status==='accepted');const novel=memories.filter(m=>!existing.some(old=>old.claim.trim()===m.claim.trim()&&old.category===m.category&&sameScope(old.scope,m.scope)));await store.addMemories(novel);await store.markAnalyzed(p.prompts);changed();return novel.length}finally{busy=false}
  });
  register('review',async(id:unknown,status:unknown)=>{if(typeof id!=='string'||!['accepted','rejected'].includes(String(status)))throw new Error('审核参数无效');await store.review(id,status as 'accepted'|'rejected');changed()});
@@ -150,15 +161,16 @@ function handlers(){
 if(!app.requestSingleInstanceLock())app.quit();else{
  app.on('second-instance',show);
  app.whenReady().then(async()=>{app.setAboutPanelOptions({applicationName:'Personal Memory',applicationVersion:app.getVersion()});await mkdir(dataDir(),{recursive:true,mode:0o700});
-  try{const saved=JSON.parse(await readFile(join(dataDir(),'settings.json'),'utf8'));for(const key of ['watchCodex','watchClaude','watchBrowser','paused'] as const)if(typeof saved[key]==='boolean')settings[key]=saved[key];if(typeof saved.codexHome==='string'&&isAbsolute(saved.codexHome))settings.codexHome=saved.codexHome;if(typeof saved.model==='string'&&saved.model.trim())settings.model=saved.model}catch(e:any){if(e.code!=='ENOENT')report(new Error('设置文件损坏，已使用默认设置。'))}
+  try{const saved=JSON.parse(await readFile(join(dataDir(),'settings.json'),'utf8'));for(const key of ['watchCodex','watchClaude','watchBrowser','paused'] as const)if(typeof saved[key]==='boolean')settings[key]=saved[key];if(saved.collectionVersion===1)settings.collectionVersion=1;if(typeof saved.codexHome==='string'&&isAbsolute(saved.codexHome))settings.codexHome=saved.codexHome;if(typeof saved.model==='string'&&saved.model.trim())settings.model=saved.model}catch(e:any){if(e.code!=='ENOENT')report(new Error('设置文件损坏，已使用默认设置。'))}
+  if(!settings.collectionVersion){settings.watchCodex=true;settings.watchClaude=true;settings.collectionVersion=1;await atomic(join(dataDir(),'settings.json'),JSON.stringify(settings))}
   store=await new Store(join(dataDir(),'tracelet.sqlite')).open();handlers();
   const icon=nativeImage.createFromPath(brandPath('trayTemplate.png'));if(icon.isEmpty())throw new Error('应用图标缺失');if(process.platform==='darwin'){icon.setTemplateImage(true);app.dock?.setIcon(brandPath('icon.png'))}
   if(!packageCheck&&!(smoke&&process.platform==='linux'&&!process.env.DISPLAY)){tray=new Tray(icon);tray.setTitle('');tray.setToolTip('Personal Memory · 个人记忆');tray.setContextMenu(Menu.buildFromTemplate([{label:'打开 Personal Memory',click:show},{label:'退出',click:()=>app.quit()}]));tray.on('click',show)}
   Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'Personal Memory',submenu:[{role:'about',label:'关于 Personal Memory'},{role:'hide',label:'隐藏 Personal Memory'},{role:'quit',label:'退出 Personal Memory'}]},{role:'editMenu'},{role:'windowMenu'}]));
-  if(packageCheck){settings.watchCodex=false;settings.watchClaude=false;settings.watchBrowser=false;settings.paused=true}
+  if(packageCheck||smoke){settings.watchCodex=false;settings.watchClaude=false;settings.watchBrowser=false;settings.paused=packageCheck}
   show();await startWatch();
   if(packageCheck){
-   const deadline=Date.now()+20000;let ready=false;while(Date.now()<deadline){if(!window!.webContents.isLoading()){ready=await window!.webContents.executeJavaScript(`!!document.querySelector('.memory-workspace')&&!!document.querySelector('.sidebar')`);if(ready)break}await new Promise(r=>setTimeout(r,100))}
+   const deadline=Date.now()+20000;let ready=false;while(Date.now()<deadline){if(!window!.webContents.isLoading()){ready=await window!.webContents.executeJavaScript(`!!document.querySelector('.data-page')&&!!document.querySelector('.sidebar')`);if(ready)break}await new Promise(r=>setTimeout(r,100))}
    if(!ready||store.count()!==0)throw new Error('Packaged renderer or empty SQLite failed');
    const apps=z.array(desktopAppSchema).parse(await nativeCapture(['--apps']));
    console.log('PACKAGE_CHECK_OK v'+app.getVersion()+': packaged renderer, SQLite/WASM, native helper ('+apps.length+' running apps); isolated data, no AI request');app.quit();return;
@@ -170,28 +182,22 @@ if(!app.requestSingleInstanceLock())app.quit();else{
    await window!.webContents.executeJavaScript(`window.tracelet.settings({watchCodex:true})`);
    const deadline=Date.now()+15000;let count=0;while(Date.now()<deadline){const s=await window!.webContents.executeJavaScript('window.tracelet.snapshot()');count=s.promptCount;if(count===2)break;await new Promise(r=>setTimeout(r,200))}
    if(count!==2)throw new Error('Smoke failed: watcher did not ingest exactly 2 prompts');
-   const evidence=store.prompts();
-   await store.addMemories([{id:'smoke-memory',category:'preferences',claim:'这次对话希望使用中文回答',layer:'episode',scope:{kind:'conversation',label:'codex:smoke-conversation'},basis:'explicit',action:'add',rationale:'本次请求明确要求中文，保持会话范围。',evidenceIds:[evidence[0].id],evidence:[evidence[0]],evidenceQuotes:[{promptId:evidence[0].id,quote:evidence[0].text}],confidence:.95,status:'pending',createdAt:new Date().toISOString()}]);changed();
-   const uiDeadline=Date.now()+10000;let rendered=false;while(Date.now()<uiDeadline){rendered=await window!.webContents.executeJavaScript(`!!document.querySelector('.memory-workspace')&&document.body.innerText.includes('这次对话希望使用中文回答')&&document.body.innerText.includes('请用中文回答。')`);if(rendered)break;await new Promise(r=>setTimeout(r,100))}if(!rendered)throw new Error('Smoke failed: split workspace did not render real data');
-   await window!.webContents.executeJavaScript(`[...document.querySelectorAll('button')].find(b=>b.textContent.includes('定位提问')).click()`);
-   await new Promise(r=>setTimeout(r,200));if(!await window!.webContents.executeJavaScript(`!!document.querySelector('.source-prompt.highlighted')`))throw new Error('Smoke failed: evidence navigation');
-   if(process.env.TRACELET_SMOKE_SCREENSHOT)await writeFile(process.env.TRACELET_SMOKE_SCREENSHOT,(await window!.webContents.capturePage()).toPNG());
-   await window!.webContents.executeJavaScript(`[...document.querySelectorAll('.memory-card button')].find(b=>b.textContent==='确认记忆').click()`);
-   const reviewDeadline=Date.now()+5000;while(Date.now()<reviewDeadline&&store.memories()[0]?.status!=='accepted')await new Promise(r=>setTimeout(r,50));if(store.memories()[0]?.status!=='accepted')throw new Error('Smoke failed: human review');
-   // Persistence completes before React's review refresh. Wait for the UI action to settle.
-   const idleDeadline=Date.now()+10000;let idle=false;while(Date.now()<idleDeadline){idle=await window!.webContents.executeJavaScript(`![...document.querySelectorAll('.memory-card button')].some(b=>b.textContent==='确认记忆')&&!![...document.querySelectorAll('.memory-card button')].find(b=>b.textContent==='撤回'&&!b.disabled)`);if(idle)break;await new Promise(r=>setTimeout(r,100))}if(!idle)throw new Error('Smoke failed: review UI did not settle');
-   await window!.webContents.executeJavaScript(`const checkbox=document.querySelector('.source-conversation input');if(!checkbox.checked)checkbox.click()`);
-   const selectionDeadline=Date.now()+10000;let selectionReady=false;while(Date.now()<selectionDeadline){selectionReady=await window!.webContents.executeJavaScript(`!!document.querySelector('.source-conversation input:checked')&&!![...document.querySelectorAll('.source-footer button')].find(b=>b.textContent.includes('预览')&&!b.disabled)`);if(selectionReady)break;await new Promise(r=>setTimeout(r,100))}if(!selectionReady)throw new Error('Smoke failed: preview selection did not settle');
-   await window!.webContents.executeJavaScript(`[...document.querySelectorAll('.source-footer button')].find(b=>b.textContent.includes('预览')&&!b.disabled).click()`);
-   const previewDeadline=Date.now()+5000;let previewReady=false;while(Date.now()<previewDeadline){previewReady=await window!.webContents.executeJavaScript(`!!document.querySelector('.outbound-context')&&document.body.innerText.includes('tracelet-memory-v2')`);if(previewReady)break;await new Promise(r=>setTimeout(r,100))}if(!previewReady)throw new Error('Smoke failed: outgoing reference preview');
+   const waitUI=async(code:string)=>{const until=Date.now()+10000;while(Date.now()<until){if(await window!.webContents.executeJavaScript(code))return;await new Promise(r=>setTimeout(r,100))}throw new Error('Smoke UI failed: '+code)};
+   await waitUI(`document.querySelectorAll('.collected-prompt').length===2&&document.body.innerText.includes('请用中文回答。')`);
+   await window!.webContents.executeJavaScript(`[...document.querySelectorAll('.nav')].find(b=>b.textContent==='记忆总结').click()`);
+   await waitUI(`!!document.querySelector('.system-prompt')&&document.body.innerText.includes('分析已暂停')`);
+   const blocked=await window!.webContents.executeJavaScript(`window.tracelet.analyze([], '').then(()=>false,e=>String(e).includes('暂停'))`);if(!blocked)throw new Error('Smoke failed: analysis must be blocked');
+   await window!.webContents.executeJavaScript(`[...document.querySelectorAll('.nav')].find(b=>b.textContent==='采集数据').click()`);
+   await writeFile(join(codexRoots()[1],'watcher.jsonl'),[{type:'session_meta',payload:{id:'smoke-followup'}},{type:'response_item',timestamp:'2026-10-23T00:00:00Z',payload:{role:'user',content:[{type:'input_text',text:'自动采集归档里的新提问。'}]}}].map(row=>JSON.stringify(row)).join('\n')+'\n');
+   const watchDeadline=Date.now()+10000;while(Date.now()<watchDeadline&&store.count()!==3)await new Promise(r=>setTimeout(r,100));if(store.count()!==3)throw new Error('Smoke failed: automatic archived watcher');
    await window!.webContents.executeJavaScript('window.tracelet.settings({watchBrowser:true})');
    const browserPacket={format:'tracelet.browser.capture.v1',url:'https://grok.com/c/smoke',conversationId:'b'.repeat(64),title:'Browser smoke',capturedAt:'2026-10-19T00:00:00Z',messages:[{id:'browser-smoke',role:'user',text:'浏览器采集保留来源。'}]};
    const host=spawn(process.execPath,[join(__dirname,'browser-host.cjs'),'--data-dir',dataDir()],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1'},stdio:['pipe','pipe','pipe']});const responses:Buffer[]=[];host.stdout.on('data',b=>responses.push(b));host.stdin.end(frame(browserPacket));
    const hostTimer=setTimeout(()=>host.kill('SIGKILL'),10000);const hostCode=await new Promise(resolve=>{host.on('error',()=>resolve(1));host.on('close',resolve)});clearTimeout(hostTimer);
    const response=Buffer.concat(responses);if(hostCode!==0||response.length<4||!JSON.parse(response.subarray(4,4+response.readUInt32LE()).toString()).ok)throw new Error('Smoke failed: compiled browser native host');
-   const browserDeadline=Date.now()+5000;while(Date.now()<browserDeadline&&store.count()!==3)await new Promise(r=>setTimeout(r,100));
-   const browserPrompt=store.prompts().find(p=>p.provider==='grok');if(store.count()!==3||browserPrompt?.timeSource!=='captured'||browserPrompt?.source!=='https://grok.com/c/smoke')throw new Error('Smoke failed: native inbox watcher');
-   console.log('TRACELET_SMOKE_OK: history scan (sessions + archives), repeated sync deduplication, watcher, SQLite/WASM, split workspace, evidence navigation, human review, exact outgoing preview, compiled native host and browser inbox; no AI request sent');app.quit();
+   const browserDeadline=Date.now()+5000;while(Date.now()<browserDeadline&&store.count()!==4)await new Promise(r=>setTimeout(r,100));
+   const browserPrompt=store.prompts().find(p=>p.provider==='grok');if(store.count()!==4||browserPrompt?.timeSource!=='captured'||browserPrompt?.source!=='https://grok.com/c/smoke')throw new Error('Smoke failed: native inbox watcher');
+   console.log('TRACELET_SMOKE_OK: history scan (sessions + archives), repeated sync deduplication, automatic archived watcher, SQLite/WASM, grouped chronological data, System Prompt display, blocked analysis, compiled native host and browser inbox; no AI request sent');app.quit();
   }
  }).catch(e=>{if(smoke||packageCheck){console.error('::error::TRACELET_SMOKE_FAILED: '+String(e.message));app.exit(1)}else{dialog.showErrorBox('Personal Memory 启动失败',String(e.message));app.quit()}});
  app.on('activate',()=>{if(store)show()});

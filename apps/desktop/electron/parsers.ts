@@ -42,7 +42,7 @@ export function parseJSONL(raw:string,provider:'codex'|'claude',source:string):P
  }
  if(provider==='codex')result.push(...candidates.map(c=>c.prompt));
  const title=result[0]?.text.split('\n')[0].slice(0,70);if(title)for(const p of result)p.conversationTitle=title;
- return result;
+ result.forEach((p,i)=>p.sequence=i);return result;
 }
 export function parseExport(raw:string,source:string,providerHint?:Provider):Prompt[]{
  const data=JSON.parse(raw);if(data.format==='personal-memory.conversations.v1')return parsePortableExport(data,source);if(data.format==='tracelet.browser-export.v1')return parseBrowserExport(data);const conversations=Array.isArray(data)?data:Array.isArray(data.conversations)?data.conversations:[data];const result:Prompt[]=[];
@@ -55,7 +55,7 @@ export function parseExport(raw:string,source:string,providerHint?:Provider):Pro
   const cid=String(c.uuid??c.id??c.conversation_id??hash(JSON.stringify(c)));
   messages.forEach((m,i)=>{const role=m.author?.role??m.sender??m.role;if(!['user','human'].includes(role))return;
    const body=textOf(m.text??m.content?.parts??m.content??m.message);if(!body.trim())return;
-   result.push(prompt(provider,cid,c.title??c.name??'',String(m.uuid??m.id??`turn-${i}`),body,m.create_time??m.created_at??m.timestamp,source));
+   result.push({...prompt(provider,cid,c.title??c.name??'',String(m.uuid??m.id??`turn-${i}`),body,m.create_time??m.created_at??m.timestamp,source),sequence:i});
   });
  }
  if(!result.length)throw new Error('文件中没有可识别的用户提问。');return result;

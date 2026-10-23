@@ -1,3 +1,4 @@
+export const ANALYSIS_ENABLED=false;
 export const ANALYSIS_VERSION='tracelet-memory-v2.1';
 
 // Research sources, implementation choices and evaluation limits: docs/MEMORY_AGENT.md.

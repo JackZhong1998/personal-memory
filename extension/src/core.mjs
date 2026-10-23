@@ -40,7 +40,7 @@ export async function extract(doc,url,rule){
   const text=(body.innerText??body.textContent??'').trim();if(!text)continue;if(text.length>64000)throw new Error('单条提问超过 64,000 字符，请缩小规则范围');
   const fingerprint=await digest(text);const ordinal=counts.get(fingerprint)??0;counts.set(fingerprint,ordinal+1);
   const nativeId=rule.idAttribute?root.getAttribute(rule.idAttribute):null;
-  messages.push({id:nativeId?'native:'+await digest(nativeId):'text:'+fingerprint+':'+ordinal,role:'user',text});
+  messages.push({sequence:messages.length,id:nativeId?'native:'+await digest(nativeId):'text:'+fingerprint+':'+ordinal,role:'user',text});
  }
  return {format:'tracelet.browser.capture.v1',url:safe,conversationId:await digest(safe+(param?'?conversation='+param:'')),title:(doc.title||u.hostname).slice(0,200),capturedAt:new Date().toISOString(),messages};
 }
@@ -49,7 +49,7 @@ export function packets(records){
  const result=[];
  for(const rows of groups.values()){
   let batch=[],bytes=0;
-  const push=()=>{if(!batch.length)return;const first=batch[0];result.push({format:'tracelet.browser.capture.v1',url:first.url,conversationId:first.conversationId,title:first.title,capturedAt:first.capturedAt,messages:batch.map(({id,text,capturedAt})=>({id,role:'user',text,capturedAt}))});batch=[];bytes=0};
+  const push=()=>{if(!batch.length)return;const first=batch[0];result.push({format:'tracelet.browser.capture.v1',url:first.url,conversationId:first.conversationId,title:first.title,capturedAt:first.capturedAt,messages:batch.map(({id,text,capturedAt,sequence})=>({id,sequence,role:'user',text,capturedAt}))});batch=[];bytes=0};
   for(const row of rows){const size=new TextEncoder().encode(JSON.stringify(row)).length;if(batch.length===50||bytes+size>700000)push();batch.push(row);bytes+=size}push();
  }
  return result;
