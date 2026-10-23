@@ -33,3 +33,11 @@ test('immediate sync supports Claude Code history as an independent source',asyn
  const dir=await mkdtemp(join(tmpdir(),'pm-claude-'));try{await writeFile(join(dir,'c.jsonl'),JSON.stringify({type:'user',uuid:'m',sessionId:'claude-session',message:{role:'user',content:'history'}})+'\n');const result=await syncCodexFiles([dir],async rows=>{assert.equal(rows[0].provider,'claude');assert.equal(rows[0].text,'history');return rows.length},new AbortController().signal,()=>{},'claude');assert.equal(result.added,1);assert.equal(result.provider,'claude')}finally{await rm(dir,{recursive:true,force:true})}
 });
 test('production memory analysis remains explicitly disabled',()=>assert.equal(ANALYSIS_ENABLED,false));
+
+test('imported offsets sort by actual time and trace updates reflect the latest instant',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'pm-timezones-'));const db=await new Store(join(dir,'db')).open();try{
+  const base={provider:'doubao' as const,conversationId:'offsets',conversationTitle:'offset history',source:'import.json'};
+  await db.upsert([{...base,id:'early',text:'first',timestamp:'2026-10-23T10:00:00+09:00'},{...base,id:'late',text:'second',timestamp:'2026-10-23T02:00:00Z'}]);
+  assert.deepEqual(db.prompts().map(p=>p.id),['early','late']);assert.equal(db.traces()[0].updatedAt,'2026-10-23T02:00:00.000Z');
+ }finally{db.close();await rm(dir,{recursive:true,force:true})}
+});
