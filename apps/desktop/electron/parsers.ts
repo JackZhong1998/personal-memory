@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Prompt, Provider } from './types';
+import {directoryProject} from './source-project';
+import {codexUserText} from './codex-text';
 import {validProvider} from './platform';
 import {parsePortableExport} from './portable-import';
 import {parseBrowserExport} from './browser-capture';
@@ -32,6 +34,7 @@ export function parseJSONL(raw:string,provider:'codex'|'claude',source:string):P
   if(provider==='codex'&&(/^(# AGENTS\.md instructions|<environment_context>|<permissions instructions>|<user_instructions>)/.test(body.trim())))continue;
   if(provider==='codex'){
    const kind=row.type==='response_item'?'response':'event';const messageId=String(id??`turn-${ordinals[kind]}`);ordinals[kind]++;
+   body=codexUserText(body);if(!body)continue;
    const p=prompt(provider,conversation,'',kind==='event'&&responseMode?'event:'+messageId:messageId,body,row.timestamp,source);
    p.sourceKeys=[hash(`${provider}:${conversation}:${kind}:${messageId}`)];p.legacyIds=[hash(`${provider}:${conversation}:${messageId}`)];
    const previous=candidates.at(-1),time=Date.parse(typeof row.timestamp==='string'?row.timestamp:'');
@@ -42,7 +45,7 @@ export function parseJSONL(raw:string,provider:'codex'|'claude',source:string):P
  }
  if(provider==='codex')result.push(...candidates.map(c=>c.prompt));
  const title=result[0]?.text.split('\n')[0].slice(0,70);if(title)for(const p of result)p.conversationTitle=title;
- result.forEach((p,i)=>p.sequence=i);return result;
+ result.forEach((p,i)=>{p.sequence=i;if(provider==='codex')p.project=directoryProject(meta?.cwd)});return result;
 }
 export function parseExport(raw:string,source:string,providerHint?:Provider):Prompt[]{
  const data=JSON.parse(raw);if(data.format==='personal-memory.conversations.v1')return parsePortableExport(data,source);if(data.format==='tracelet.browser-export.v1')return parseBrowserExport(data);const conversations=Array.isArray(data)?data:Array.isArray(data.conversations)?data.conversations:[data];const result:Prompt[]=[];

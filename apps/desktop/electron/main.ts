@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, dialog, safeStorage, Tray, Menu, nativeImage, shell, systemPreferences } from 'electron';
+import {writeFileSync} from 'node:fs';
 import { readFile, writeFile, mkdir, rename, unlink, stat, readdir, chmod } from 'node:fs/promises';
 import { join, resolve, basename, dirname, isAbsolute, sep } from 'node:path';
 import {spawn,execFile} from 'node:child_process';
@@ -7,7 +8,10 @@ import {DesktopReview,desktopAppSchema,desktopReadSchema} from './desktop-captur
 import {z} from 'zod';
 import {browserConnection,localConnection} from './connections';
 import {ANALYSIS_ENABLED} from './memory-prompt';
-import {syncCodexFiles} from './history-sync';
+import {readLocalJSONL} from './local-jsonl';
+import {syncDoubaoWork,watchDoubaoWork} from './doubao-work';
+import {readCodexDatabase,watchCodexDatabase,codexDatabaseName} from './codex-database';
+import {syncCodexFiles,syncCodexHistory} from './history-sync';
 import {validProvider} from './platform';
 import { homedir, tmpdir } from 'node:os';
 import { watch, type FSWatcher } from 'chokidar';
@@ -18,8 +22,9 @@ import { preview, digest, analyze, sameScope } from './analyzer';
 import type { Settings, HistorySyncState, Provider } from './types';
 
 let window:BrowserWindow|null=null;let tray:Tray;let store:Store;let quitting=false;let watcher:FSWatcher|undefined;
-let settings:Omit<Settings,'keyPresent'|'keyStorageAvailable'>={watchCodex:true,watchClaude:true,watchBrowser:false,model:'deepseek/deepseek-v4-flash',paused:false};
-let browserWatcher:FSWatcher|undefined;
+let settings:Omit<Settings,'keyPresent'|'keyStorageAvailable'>={watchCodex:true,watchClaude:true,watchDoubaoWork:true,watchBrowser:false,model:'deepseek/deepseek-v4-flash',paused:false};
+let browserWatcher:FSWatcher|undefined;let doubaoWatcher:ReturnType<typeof watchDoubaoWork>|undefined;let doubaoGeneration=0;let codexDatabaseWatcher:ReturnType<typeof watchCodexDatabase>|undefined;
+const doubaoRoots=()=>[join(homedir(),'Library/Application Support/DoubaoWork/Default/.doubaowork/agent_mode/workspace/.sessions')];
 let historySync:HistorySyncState|undefined;let historyAbort:AbortController|undefined;let historyTask:Promise<HistorySyncState>|undefined;
 const codexHome=()=>resolve(settings.codexHome||process.env.CODEX_HOME||join(homedir(),'.codex'));
 const claudeRoots=()=>[join(homedir(),'.claude','projects')];
@@ -35,6 +40,9 @@ if(packageCheck){const target=process.env.PERSONAL_MEMORY_PACKAGE_CHECK_DATA;if(
 if(smoke||packageCheck)app.disableHardwareAcceleration();
 if(smoke&&process.env.TRACELET_SMOKE_DATA)app.setPath('userData',process.env.TRACELET_SMOKE_DATA);
 const dataDir=()=>app.getPath('userData');
+const startupEvents:{stage:string;at:string}[]=[];
+function startupStage(stage:string){startupEvents.push({stage,at:new Date().toISOString()});if(startupEvents.length>20)startupEvents.shift();try{writeFileSync(join(dataDir(),'startup-status.json'),JSON.stringify({version:app.getVersion(),pid:process.pid,events:startupEvents}),{mode:0o600})}catch{}}
+let firstSnapshot=true;
 const brandPath=(file:string)=>app.isPackaged?join(process.resourcesPath,'brand',file):join(__dirname,'../assets/brand',file);
 const keyFile=()=>join(dataDir(),'openrouter.key');
 const desktopReview=new DesktopReview();
@@ -48,7 +56,7 @@ const report=(e:unknown)=>{errors=[String(e instanceof Error?e.message:e),...err
 async function atomic(file:string,data:string|Buffer){await writeFile(file+'.tmp',data,{mode:0o600});await rename(file+'.tmp',file)}
 async function getKey(){try{return safeStorage.decryptString(await readFile(keyFile()))}catch(e:any){if(e.code==='ENOENT')return '';throw new Error('无法解锁 API Key。请重新保存 Key。')}}
 async function keyPresent(){try{await stat(keyFile());return true}catch{return false}}
-async function publicSettings(){return {...settings,codexHome:codexHome(),keyPresent:await keyPresent(),keyStorageAvailable:!packageCheck&&safeStorage.isEncryptionAvailable()}}
+async function publicSettings(){return {...settings,codexHome:codexHome(),keyPresent:await keyPresent(),keyStorageAvailable:ANALYSIS_ENABLED&&!packageCheck&&safeStorage.isEncryptionAvailable()}}
 function show(){if(window){window.show();window.focus();return}
  window=new BrowserWindow({width:1250,height:850,minWidth:960,minHeight:680,title:'Personal Memory · 你的个人记忆层',icon:brandPath('icon.png'),show:!(smoke||packageCheck),backgroundColor:'#ffffff',webPreferences:{...((smoke||packageCheck)?{offscreen:true,backgroundThrottling:false}:{}),preload:join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
  window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
@@ -60,15 +68,26 @@ function show(){if(window){window.show();window.focus();return}
 function register(name:string,fn:(...args:any[])=>unknown){ipcMain.handle(name,async(event,...args)=>{if(event.sender!==window?.webContents)throw new Error('不可信的请求来源');return fn(...args)})}
 async function ingest(path:string,provider:'codex'|'claude'){
  if(settings.paused||!path.endsWith('.jsonl'))return;
- if((await stat(path)).size>100*1024*1024)throw new Error('跳过超过 100 MB 的对话文件：'+path);
- const prompts=parseJSONL(await readFile(path,'utf8'),provider,path);await store.upsert(prompts);changed();
+ const prompts=await readLocalJSONL(path,provider);if(!settings.paused)await store.upsert(prompts);changed();
 }
 async function ingestBrowser(file:string){
  if(settings.paused||!settings.watchBrowser||!file.endsWith('.json'))return;
  if((await stat(file)).size>1024*1024)throw new Error('浏览器数据包超过限制');
  await store.upsert(browserPrompts(JSON.parse(await readFile(file,'utf8'))));await unlink(file);changed();
 }
-async function startWatch(){await browserWatcher?.close();browserWatcher=undefined;
+async function startWatch(){
+ const generation=++doubaoGeneration;
+ await codexDatabaseWatcher?.close();codexDatabaseWatcher=undefined;
+ if(settings.watchCodex&&!settings.paused){
+  const sync=()=>{queue=queue.then(async()=>{if(generation!==doubaoGeneration||settings.paused||!settings.watchCodex)return;const rows=await readCodexDatabase(codexHome());if(generation===doubaoGeneration&&!settings.paused&&settings.watchCodex){await store.upsert(rows);changed()}}).catch(report)};
+  codexDatabaseWatcher=watchCodexDatabase(codexHome(),sync,report);sync();
+ }
+await doubaoWatcher?.close();doubaoWatcher=undefined;
+ if(settings.watchDoubaoWork&&!settings.paused){
+  const sync=()=>{queue=queue.then(async()=>{if(generation!==doubaoGeneration||settings.paused||!settings.watchDoubaoWork)return;const result=await syncDoubaoWork(doubaoRoots(),rows=>generation!==doubaoGeneration||settings.paused||!settings.watchDoubaoWork?Promise.resolve(0):store.upsert(rows),new AbortController().signal,()=>{});if(result.errors.length)report(result.errors.join('\n'));changed()}).catch(report)};
+  doubaoWatcher=watchDoubaoWork(doubaoRoots(),sync,report);sync();
+ }
+ await browserWatcher?.close();browserWatcher=undefined;
  if(settings.watchBrowser&&!settings.paused){const inbox=join(dataDir(),'browser-inbox');await mkdir(inbox,{recursive:true,mode:0o700});
  browserWatcher=watch(inbox,{ignoreInitial:false,followSymlinks:false,awaitWriteFinish:{stabilityThreshold:300,pollInterval:100}});
  browserWatcher.on('add',file=>{queue=queue.then(()=>ingestBrowser(file)).catch(report)}).on('error',report);
@@ -85,11 +104,11 @@ async function startWatch(){await browserWatcher?.close();browserWatcher=undefin
 function selected(ids:unknown){if(!Array.isArray(ids)||ids.length>1000||ids.some(i=>typeof i!=='string'))throw new Error('对话选择无效');return store.prompts().filter(p=>ids.includes(`${p.provider}:${p.conversationId}`))}
 function handlers(){
  const syncLocal=async(provider:unknown)=>{
-  if(provider!=='codex'&&provider!=='claude')throw new Error('未知本地来源');
+  if(provider!=='codex'&&provider!=='claude'&&provider!=='doubao-work')throw new Error('未知本地来源');
   if(settings.paused)throw new Error('采集已暂停，请先恢复采集');
   if(historyTask){if(historySync?.provider!==provider)throw new Error('另一个应用正在同步，请稍候');return historyTask}
   const controller=new AbortController();historyAbort=controller;
-  historyTask=syncCodexFiles(provider==='codex'?codexRoots():claudeRoots(),rows=>settings.paused||controller.signal.aborted?Promise.resolve(0):store.upsert(rows),controller.signal,state=>{historySync=state;changed()},provider);
+  historyTask=provider==='codex'?syncCodexHistory(codexRoots(),rows=>settings.paused||controller.signal.aborted?Promise.resolve(0):store.upsert(rows),controller.signal,state=>{historySync=state;changed()}):provider==='doubao-work'?syncDoubaoWork(doubaoRoots(),rows=>settings.paused||controller.signal.aborted?Promise.resolve(0):store.upsert(rows),controller.signal,state=>{historySync=state;changed()}):syncCodexFiles(claudeRoots(),rows=>settings.paused||controller.signal.aborted?Promise.resolve(0):store.upsert(rows),controller.signal,state=>{historySync=state;changed()},provider);
   try{return await historyTask}finally{historyTask=undefined;historyAbort=undefined}
  };
  register('sync-codex-history',()=>syncLocal('codex'));
@@ -97,25 +116,25 @@ function handlers(){
  register('connections',async()=>{
   const configured:('chrome'|'edge')[]=[];
   for(const browser of ['chrome','edge'] as const)try{const dir=join(homedir(),'Library/Application Support',browser==='chrome'?'Google/Chrome':'Microsoft Edge','NativeMessagingHosts');const manifest=JSON.parse(await readFile(join(dir,'app.tracelet.browser.json'),'utf8'));if(manifest.name==='app.tracelet.browser'&&Array.isArray(manifest.allowed_origins)&&manifest.allowed_origins.length&&manifest.path===join(dataDir(),'browser-host.sh')){await stat(manifest.path);configured.push(browser)}}catch{}
-  return {local:await Promise.all([localConnection('codex',codexRoots(),settings.watchCodex,settings.paused),localConnection('claude',claudeRoots(),settings.watchClaude,settings.paused)]),browser:await browserConnection(dataDir(),configured),accessibility:process.platform==='darwin'&&systemPreferences.isTrustedAccessibilityClient(false)};
+  return {local:await Promise.all([localConnection('codex',[...codexRoots(),join(codexHome(),codexDatabaseName)],settings.watchCodex,settings.paused),localConnection('claude',claudeRoots(),settings.watchClaude,settings.paused),localConnection('doubao-work',doubaoRoots(),!!settings.watchDoubaoWork,settings.paused)]),browser:await browserConnection(dataDir(),configured),accessibility:process.platform==='darwin'&&systemPreferences.isTrustedAccessibilityClient(false)};
  });
  register('cancel-history-sync',()=>{historyAbort?.abort()});
  register('choose-codex-home',async()=>{
   if(historyTask)throw new Error('请先停止历史同步');
-  const result=await dialog.showOpenDialog({title:'选择 Codex 数据目录（包含 sessions 或 archived_sessions）',defaultPath:codexHome(),properties:['openDirectory','showHiddenFiles']});
+  const result=await dialog.showOpenDialog({title:'选择 Codex 数据目录（包含会话目录或历史数据库）',defaultPath:codexHome(),properties:['openDirectory','showHiddenFiles']});
   if(result.canceled)return false;let selected=resolve(result.filePaths[0]);if(['sessions','archived_sessions'].includes(basename(selected)))selected=dirname(selected);
-  const exists=await Promise.all(['sessions','archived_sessions'].map(async name=>{try{return (await stat(join(selected,name))).isDirectory()}catch{return false}}));
-  if(!exists.some(Boolean))throw new Error('此目录下没有 sessions 或 archived_sessions，请选择 Codex 的数据目录');
+  const exists=await Promise.all(['sessions','archived_sessions',codexDatabaseName].map(async name=>{try{const s=await stat(join(selected,name));return name===codexDatabaseName?s.isFile():s.isDirectory()}catch{return false}}));
+  if(!exists.some(Boolean))throw new Error('此目录下没有会话目录或历史数据库，请选择 Codex 的数据目录');
   settings.codexHome=selected;historySync=undefined;await atomic(join(dataDir(),'settings.json'),JSON.stringify(settings));await startWatch();changed();return true;
  });
  register('desktop-apps',async()=>z.array(desktopAppSchema).parse(await nativeCapture(['--apps'])));
  register('desktop-permission',()=>{if(process.platform!=='darwin')throw new Error('窗口采集仅支持 macOS');return systemPreferences.isTrustedAccessibilityClient(true)});
  register('desktop-preview',async(pid:unknown)=>{desktopReview.clear();if(settings.paused)throw new Error('采集已暂停，请先恢复');if(typeof pid!=='number'||!Number.isInteger(pid)||pid<=0)throw new Error('请选择正在运行的应用');const raw=desktopReadSchema.parse(await nativeCapture(['--read',String(pid)]));if(settings.paused)throw new Error('采集已暂停');if(raw.app.pid!==pid)throw new Error('应用已变化，请刷新列表');return desktopReview.stage(raw)});
  register('desktop-commit',async(token:unknown,ids:unknown,provider:unknown,conversation:unknown)=>{if(settings.paused)throw new Error('采集已暂停');const rows=desktopReview.confirm(token,ids,provider,conversation);const added=await store.upsert(rows);desktopReview.clear();changed();return added});
- register('snapshot',async()=>({traces:store.traces(),memories:store.memories(),settings:await publicSettings(),historySync,errors,promptCount:store.count()}));
+ register('snapshot',async()=>{const initial=firstSnapshot;if(initial)startupStage('snapshot-start');const publicConfig=await publicSettings();if(initial)startupStage('snapshot-settings-ready');const result={traces:store.traces(),memories:store.memories(),settings:publicConfig,historySync,errors,promptCount:store.count()};if(initial){firstSnapshot=false;startupStage('snapshot-complete')}return result});
  register('prompts',(id:unknown)=>{if(typeof id!=='string')throw new Error('对话 ID 无效');return store.prompts(id)});
  register('settings',async(value:unknown)=>{if(!value||typeof value!=='object')throw new Error('设置无效');const v=value as Record<string,unknown>;
-  for(const key of ['watchCodex','watchClaude','watchBrowser','paused'] as const){if(key in v){if(typeof v[key]!=='boolean')throw new Error('设置无效');settings[key]=v[key]}}
+  for(const key of ['watchCodex','watchClaude','watchDoubaoWork','watchBrowser','paused'] as const){if(key in v){if(typeof v[key]!=='boolean')throw new Error('设置无效');settings[key]=v[key]}}
   if(settings.paused){desktopReview.clear();historyAbort?.abort()}
   if('model' in v){if(typeof v.model!=='string'||!v.model.trim()||v.model.length>200)throw new Error('模型 ID 无效');settings.model=v.model.trim()}
   await atomic(join(dataDir(),'settings.json'),JSON.stringify(settings));await startWatch();changed();
@@ -161,14 +180,14 @@ function handlers(){
 if(!app.requestSingleInstanceLock())app.quit();else{
  app.on('second-instance',show);
  app.whenReady().then(async()=>{app.setAboutPanelOptions({applicationName:'Personal Memory',applicationVersion:app.getVersion()});await mkdir(dataDir(),{recursive:true,mode:0o700});
-  try{const saved=JSON.parse(await readFile(join(dataDir(),'settings.json'),'utf8'));for(const key of ['watchCodex','watchClaude','watchBrowser','paused'] as const)if(typeof saved[key]==='boolean')settings[key]=saved[key];if(saved.collectionVersion===1)settings.collectionVersion=1;if(typeof saved.codexHome==='string'&&isAbsolute(saved.codexHome))settings.codexHome=saved.codexHome;if(typeof saved.model==='string'&&saved.model.trim())settings.model=saved.model}catch(e:any){if(e.code!=='ENOENT')report(new Error('设置文件损坏，已使用默认设置。'))}
+  try{const saved=JSON.parse(await readFile(join(dataDir(),'settings.json'),'utf8'));for(const key of ['watchCodex','watchClaude','watchDoubaoWork','watchBrowser','paused'] as const)if(typeof saved[key]==='boolean')settings[key]=saved[key];if(saved.collectionVersion===1)settings.collectionVersion=1;if(typeof saved.codexHome==='string'&&isAbsolute(saved.codexHome))settings.codexHome=saved.codexHome;if(typeof saved.model==='string'&&saved.model.trim())settings.model=saved.model}catch(e:any){if(e.code!=='ENOENT')report(new Error('设置文件损坏，已使用默认设置。'))}
   if(!settings.collectionVersion){settings.watchCodex=true;settings.watchClaude=true;settings.collectionVersion=1;await atomic(join(dataDir(),'settings.json'),JSON.stringify(settings))}
-  store=await new Store(join(dataDir(),'tracelet.sqlite')).open();handlers();
+  store=await new Store(join(dataDir(),'tracelet.sqlite')).open();handlers();startupStage('store-ready');
   const icon=nativeImage.createFromPath(brandPath('trayTemplate.png'));if(icon.isEmpty())throw new Error('应用图标缺失');if(process.platform==='darwin'){icon.setTemplateImage(true);app.dock?.setIcon(brandPath('icon.png'))}
   if(!packageCheck&&!(smoke&&process.platform==='linux'&&!process.env.DISPLAY)){tray=new Tray(icon);tray.setTitle('');tray.setToolTip('Personal Memory · 个人记忆');tray.setContextMenu(Menu.buildFromTemplate([{label:'打开 Personal Memory',click:show},{label:'退出',click:()=>app.quit()}]));tray.on('click',show)}
   Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'Personal Memory',submenu:[{role:'about',label:'关于 Personal Memory'},{role:'hide',label:'隐藏 Personal Memory'},{role:'quit',label:'退出 Personal Memory'}]},{role:'editMenu'},{role:'windowMenu'}]));
-  if(packageCheck||smoke){settings.watchCodex=false;settings.watchClaude=false;settings.watchBrowser=false;settings.paused=packageCheck}
-  show();await startWatch();
+  if(packageCheck||smoke){settings.watchCodex=false;settings.watchClaude=false;settings.watchDoubaoWork=false;settings.watchBrowser=false;settings.paused=packageCheck}
+  show();startupStage('window-created');await startWatch();startupStage('watchers-ready');
   if(packageCheck){
    const deadline=Date.now()+20000;let ready=false;while(Date.now()<deadline){if(!window!.webContents.isLoading()){ready=await window!.webContents.executeJavaScript(`!!document.querySelector('.data-page')&&!!document.querySelector('.sidebar')`);if(ready)break}await new Promise(r=>setTimeout(r,100))}
    if(!ready||store.count()!==0)throw new Error('Packaged renderer or empty SQLite failed');
@@ -201,6 +220,6 @@ if(!app.requestSingleInstanceLock())app.quit();else{
   }
  }).catch(e=>{if(smoke||packageCheck){console.error('::error::TRACELET_SMOKE_FAILED: '+String(e.message));app.exit(1)}else{dialog.showErrorBox('Personal Memory 启动失败',String(e.message));app.quit()}});
  app.on('activate',()=>{if(store)show()});
- app.on('before-quit',()=>{quitting=true;historyAbort?.abort();void watcher?.close();void browserWatcher?.close()});
+ app.on('before-quit',()=>{quitting=true;++doubaoGeneration;void doubaoWatcher?.close();void codexDatabaseWatcher?.close();historyAbort?.abort();void watcher?.close();void browserWatcher?.close()});
  app.on('window-all-closed',()=>{});
 }

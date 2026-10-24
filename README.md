@@ -6,13 +6,13 @@
 
 首版产品和官网已包含在此仓库。网站下载按钮读取发布清单，只有真实 Release 同时具有两个架构的 DMG 和校验文件时才启用。
 
-## 0.7.0 · 三个页面
+## 0.7.2 · 本地采集与三个页面
 
 - **采集数据**：应用 → 对话 → 按时间正序的用户输入。同一对话聚合展示，保留来源与采集时间标识。
 - **记忆总结**：左侧完整 System Prompt，右侧只读已有结果。当前停止所有新分析，后端也拒绝执行。
 - **连接设置**：本地来源状态与「立即同步」，浏览器插件四步流程图、配对状态、实际响应和待同步数量。
 
-Codex 与 Claude Code 默认自动读取本机历史并持续同步。首次升级到此版本也启用这两个本地来源，保留已有的暂停状态；此后的开关选择会保存。网页仍需逐站授权。豆包等其他桌面应用目前是手动窗口采集或文件导入，不支持全账号自动历史同步。
+Codex 与 Claude Code 默认自动读取本机历史并持续同步。首次升级到此版本也启用这两个本地来源，保留已有的暂停状态；此后的开关选择会保存。网页仍需逐站授权。豆包工作 PC 端新增本地 Agent 会话采集：默认扫描 `.sessions` 下主 Agent 的 `assignment.md`，保留用户需求与原始时间，持续同步新增内容。普通豆包及未落盘的云端会话仍需窗口采集或文件导入，不支持全账号自动历史同步。
 
 提示词的研究映射和协议边界见 [Memory Curator v2](docs/MEMORY_AGENT.md)。
 
@@ -21,6 +21,7 @@ Codex 与 Claude Code 默认自动读取本机历史并持续同步。首次升�
 | 来源 | 接入方式 | 范围 |
 | --- | --- | --- |
 | Codex | 监听 `sessions` 和 `archived_sessions` 下的 JSONL，支持 `CODEX_HOME` 与手选目录 | 用户文本；排除助手、工具和已识别的启动上下文 |
+| 豆包工作 PC | 监听 `DoubaoWork/Default/.doubaowork/agent_mode/workspace/.sessions` | 主 Agent 用户需求；排除子任务与系统通知，详见 [说明](docs/DOUBAO_WORK.md) |
 | Claude Code | 监听 `~/.claude/projects/**/*.jsonl` | user 消息中的 text 块；排除 tool_result、meta 消息 |
 | ChatGPT | 导入 `conversations.json` | mapping 中的 user 消息，保留分支中的用户消息 |
 | Claude 网页版 | 导入 JSON | conversations 数组中的 `chat_messages`，sender 为 human/user |
@@ -81,4 +82,4 @@ MIT。用户数据、第三方平台服务和模型使用仍受各自政策约�
 
 在采集数据页或连接设置点击「立即同步」，扫描本机 `sessions` 和 `archived_sessions`（含日期子目录）。支持选择实际 Codex 数据目录、进度、失败提示和重复同步去重。Codex 与 Claude Code 默认持续采集，可在连接设置中关闭。仅在 Codex 云端、未落盘到本机的会话不在扫描范围。
 
-豆包目前不支持自动遍历整个账号的历史；可批量导入带 `messages` 的 `role/content` JSON 或 Personal Memory 通用文件。入口会明确标记豆包来源，但不代表已验证豆包原生导出格式。桌面窗口和浏览器扩展只读取已加载内容。详见 [历史同步说明](docs/HISTORY_SYNC.md)。
+豆包工作本地 Agent 历史已支持自动同步。普通豆包目前不支持自动遍历整个账号的历史；可批量导入带 `messages` 的 `role/content` JSON 或 Personal Memory 通用文件。入口会明确标记豆包来源，但不代表已验证豆包原生导出格式。桌面窗口和浏览器扩展只读取已加载内容。详见 [历史同步说明](docs/HISTORY_SYNC.md)。

@@ -4,9 +4,11 @@ const hash=(s:string)=>createHash('sha256').update(s).digest('hex');
 // Keep persisted message IDs when old event-only rollouts later acquire response items.
 export function reconcileCodexIdentities(rows:Prompt[],existing:Prompt[]):Prompt[]{
  const result=rows.map(p=>({...p})),used=new Set<string>(),occupied=new Set(existing.map(p=>p.id));
- const assign=(p:Prompt,old:Prompt)=>{p.id=old.id;p.sourceKeys=[...new Set([...(old.sourceKeys??[]),...(p.sourceKeys??[])])];used.add(old.id)};
+ const assign=(p:Prompt,old:Prompt)=>{p.id=old.id;if(p.project?.id.startsWith('directory:')&&old.project&&!old.project.id.startsWith('directory:')&&old.project.path===p.project.path)p.project=old.project;p.sourceKeys=[...new Set([...(old.sourceKeys??[]),...(p.sourceKeys??[])])];used.add(old.id)};
  const matched=new Set<Prompt>();
  for(const p of result){const old=existing.find(o=>!used.has(o.id)&&o.sourceKeys?.some(key=>p.sourceKeys?.includes(key)));if(old){assign(p,old);matched.add(p)}}
+ // Match the two local storage formats without merging two distinct repeats within either format.
+ for(const p of result.filter(p=>!matched.has(p))){const old=existing.find(o=>!used.has(o.id)&&p.source.endsWith('.sqlite')!==o.source.endsWith('.sqlite')&&o.text===p.text&&Math.abs(Date.parse(o.timestamp)-Date.parse(p.timestamp))<=2000);if(old){assign(p,old);matched.add(p)}}
  for(const p of result.filter(p=>!matched.has(p))){const old=existing.find(o=>!used.has(o.id)&&!o.sourceKeys?.length&&o.text===p.text&&o.timestamp===p.timestamp);if(old){assign(p,old);matched.add(p)}}
  for(const p of result.filter(p=>!matched.has(p))){
   const old=existing.find(o=>!used.has(o.id)&&!o.sourceKeys?.length&&[p.id,...(p.legacyIds??[])].includes(o.id));

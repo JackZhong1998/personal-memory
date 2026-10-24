@@ -2,6 +2,7 @@ import initSqlJs, { type Database } from 'sql.js';
 import { mkdir, readFile, writeFile, rename, chmod } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { Prompt, Memory, Trace } from './types';
+import {codexUserText} from './codex-text';
 import { hash } from './parsers';
 import {reconcileCodexIdentities} from './codex-identities';
 import { ANALYSIS_VERSION } from './memory-prompt';
@@ -15,15 +16,22 @@ export class Store {
   this.db=new SQL.Database(bytes);
   this.db.run('CREATE TABLE IF NOT EXISTS prompts (id TEXT PRIMARY KEY, provider TEXT NOT NULL, conversationId TEXT NOT NULL, conversationTitle TEXT NOT NULL, text TEXT NOT NULL, timestamp TEXT NOT NULL, source TEXT NOT NULL); CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS analyzed (id TEXT PRIMARY KEY, hash TEXT NOT NULL);');
   if(!this.all('PRAGMA table_info(prompts)').some(r=>r.name==='meta'))this.db.run("ALTER TABLE prompts ADD COLUMN meta TEXT NOT NULL DEFAULT '{}'");
+  // Retain excluded raw records in SQLite, but remove app context from all user-facing queries.
+  for(const row of this.all("SELECT id,text,meta FROM prompts WHERE provider='codex'")){
+   const text=codexUserText(row.text),meta=JSON.parse(row.meta||'{}');
+   if(!text){meta.collectionExcluded=true;this.db.run('UPDATE prompts SET meta=? WHERE id=?',[JSON.stringify(meta),row.id])}
+   else if(text!==row.text){meta.originalText=row.text;this.db.run('UPDATE prompts SET text=?,meta=? WHERE id=?',[text,JSON.stringify(meta),row.id])}
+  }
+  const titled=new Set<string>();for(const p of this.prompts())if(p.provider==='codex'&&!titled.has(p.conversationId)){titled.add(p.conversationId);this.db.run("UPDATE prompts SET conversationTitle=? WHERE provider='codex' AND conversationId=?",[p.text.split('\n')[0].slice(0,70),p.conversationId])}
   await this.flush();return this;
  }
  private persist:Promise<void>=Promise.resolve();
  private flush(){const bytes=this.db.export();this.persist=this.persist.catch(()=>{}).then(async()=>{const tmp=this.file+'.tmp';await writeFile(tmp,bytes,{mode:0o600});await chmod(tmp,0o600);await rename(tmp,this.file)});return this.persist}
  private all(sql:string,args:(string|number)[]=[]):any[]{const s=this.db.prepare(sql);try{s.bind(args);const rows=[];while(s.step())rows.push(s.getAsObject());return rows}finally{s.free()}}
  async upsert(prompts:Prompt[]){const groups=new Map<string,Prompt[]>();for(const p of prompts)if(p.provider==='codex'&&p.sourceKeys?.length){const group=groups.get(p.conversationId)??[];group.push(p);groups.set(p.conversationId,group)}const mapped=new Map<Prompt,Prompt>();for(const [conversation,rows] of groups){const reconciled=reconcileCodexIdentities(rows,this.prompts('codex:'+conversation));rows.forEach((p,i)=>mapped.set(p,reconciled[i]))}prompts=prompts.map(p=>mapped.get(p)??p);let added=0;this.db.run('BEGIN');try{for(const p of prompts){if(!this.all('SELECT id FROM prompts WHERE id=?',[p.id]).length)added++;
-  this.db.run(`INSERT INTO prompts (id,provider,conversationId,conversationTitle,text,timestamp,source,meta) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET text=excluded.text, conversationTitle=excluded.conversationTitle, timestamp=CASE WHEN json_extract(prompts.meta,'$.timeSource')='captured' AND json_extract(excluded.meta,'$.timeSource')='captured' AND prompts.text=excluded.text THEN prompts.timestamp ELSE excluded.timestamp END, source=excluded.source, meta=excluded.meta WHERE json_extract(prompts.meta,'$.capturedAt') IS NULL OR json_extract(excluded.meta,'$.capturedAt') IS NULL OR json_extract(excluded.meta,'$.capturedAt') >= json_extract(prompts.meta,'$.capturedAt')`,[p.id,p.provider,p.conversationId,p.conversationTitle,p.text,p.timestamp,p.source,JSON.stringify({timeSource:p.timeSource,capturedAt:p.capturedAt,sourceKeys:p.sourceKeys,sequence:p.sequence})]);}this.db.run('COMMIT')}catch(e){this.db.run('ROLLBACK');throw e}await this.flush();return added}
- traces():Trace[]{return this.all("SELECT provider || ':' || conversationId AS id, provider, conversationTitle AS title, count(*) AS count, strftime('%Y-%m-%dT%H:%M:%fZ', max(julianday(timestamp))) AS updatedAt FROM prompts GROUP BY provider, conversationId ORDER BY updatedAt DESC")}
- prompts(traceId?:string):Prompt[]{return this.all('SELECT * FROM prompts'+(traceId?" WHERE provider || ':' || conversationId = ?":'')+" ORDER BY julianday(timestamp), CAST(json_extract(meta,'$.sequence') AS INTEGER), rowid",traceId?[traceId]:[]).map(({meta,...p})=>({...p,...JSON.parse(meta||'{}')})) as Prompt[]}
+  this.db.run(`INSERT INTO prompts (id,provider,conversationId,conversationTitle,text,timestamp,source,meta) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET text=excluded.text, conversationTitle=excluded.conversationTitle, timestamp=CASE WHEN json_extract(prompts.meta,'$.timeSource')='captured' AND json_extract(excluded.meta,'$.timeSource')='captured' AND prompts.text=excluded.text THEN prompts.timestamp ELSE excluded.timestamp END, source=excluded.source, meta=json_patch(excluded.meta,CASE WHEN json_type(excluded.meta,'$.project') IS NULL AND json_type(prompts.meta,'$.project')='object' THEN json_object('project',json_extract(prompts.meta,'$.project')) ELSE '{}' END) WHERE json_extract(prompts.meta,'$.capturedAt') IS NULL OR json_extract(excluded.meta,'$.capturedAt') IS NULL OR json_extract(excluded.meta,'$.capturedAt') >= json_extract(prompts.meta,'$.capturedAt')`,[p.id,p.provider,p.conversationId,p.conversationTitle,p.text,p.timestamp,p.source,JSON.stringify({timeSource:p.timeSource,capturedAt:p.capturedAt,sourceKeys:p.sourceKeys,sequence:p.sequence,project:p.project})]);}this.db.run('COMMIT')}catch(e){this.db.run('ROLLBACK');throw e}await this.flush();return added}
+ traces():Trace[]{return this.all("SELECT p.provider || ':' || p.conversationId AS id, p.provider, p.conversationTitle AS title, count(*) AS count, strftime('%Y-%m-%dT%H:%M:%fZ', max(julianday(p.timestamp))) AS updatedAt, (SELECT json_extract(q.meta,'$.project') FROM prompts q WHERE q.provider=p.provider AND q.conversationId=p.conversationId AND json_type(q.meta,'$.project') IS NOT NULL AND COALESCE(json_extract(q.meta,'$.collectionExcluded'),0)=0 ORDER BY q.rowid DESC LIMIT 1) AS project FROM prompts p WHERE COALESCE(json_extract(p.meta,'$.collectionExcluded'),0)=0 GROUP BY p.provider, p.conversationId ORDER BY updatedAt DESC").map(({project,...t})=>({...t,project:project?JSON.parse(project):undefined}))}
+ prompts(traceId?:string):Prompt[]{return this.all("SELECT * FROM prompts WHERE COALESCE(json_extract(meta,'$.collectionExcluded'),0)=0"+(traceId?" AND provider || ':' || conversationId = ?":'')+" ORDER BY julianday(timestamp), CAST(json_extract(meta,'$.sequence') AS INTEGER), rowid",traceId?[traceId]:[]).map(({meta,...p})=>({...p,...JSON.parse(meta||'{}')})) as Prompt[]}
  memories():Memory[]{return this.all('SELECT json FROM memories').map(r=>JSON.parse(r.json)).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))}
  async addMemories(memories:Memory[]){for(const m of memories)this.db.run('INSERT OR REPLACE INTO memories VALUES (?,?)',[m.id,JSON.stringify(m)]);await this.flush()}
  unanalyzed(prompts:Prompt[]){return prompts.filter(p=>this.all('SELECT hash FROM analyzed WHERE id=?',[p.id])[0]?.hash!==hash(ANALYSIS_VERSION+':'+p.text))}
@@ -40,6 +48,6 @@ export class Store {
   changes.push({...m,status});this.db.run('BEGIN');try{for(const row of changes)this.db.run('INSERT OR REPLACE INTO memories VALUES (?,?)',[row.id,JSON.stringify(row)]);this.db.run('COMMIT')}catch(e){this.db.run('ROLLBACK');throw e}await this.flush();
  }
  async erase(){this.db.run('DELETE FROM prompts; DELETE FROM memories; DELETE FROM analyzed; VACUUM;');await this.flush()}
- count(){return Number(this.all('SELECT count(*) AS n FROM prompts')[0].n)}
+ count(){return Number(this.all("SELECT count(*) AS n FROM prompts WHERE COALESCE(json_extract(meta,'$.collectionExcluded'),0)=0")[0].n)}
  close(){this.db.close()}
 }

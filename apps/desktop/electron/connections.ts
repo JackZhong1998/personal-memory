@@ -2,9 +2,9 @@ import {access,readFile} from 'node:fs/promises';
 import {constants} from 'node:fs';
 import {join} from 'node:path';
 import {z} from 'zod';
-import type {BrowserConnection,LocalConnection} from './types';
+import type {BrowserConnection,LocalConnection,LocalProvider} from './types';
 export const browserStatusSchema=z.object({format:z.literal('personal-memory.browser.status.v1'),version:z.string().max(40),enabledSites:z.number().int().min(0).max(10000),pending:z.number().int().min(0).max(100000),sites:z.array(z.object({host:z.string().min(1).max(253).regex(/^[a-zA-Z0-9.-]+$/),enabled:z.boolean()}).strict()).max(200).optional()}).strict();
-export async function localConnection(provider:'codex'|'claude',roots:string[],enabled:boolean,paused:boolean):Promise<LocalConnection>{
+export async function localConnection(provider:LocalProvider,roots:string[],enabled:boolean,paused:boolean):Promise<LocalConnection>{
  let available=false;const errors:string[]=[];
  for(const path of roots)try{await access(path,constants.R_OK);available=true}catch(e:any){if(e.code!=='ENOENT')errors.push(path+': '+e.message)}
  return {provider,roots,enabled,available,state:paused?'paused':!enabled?'off':errors.length?'error':available?'watching':'missing',errors};
